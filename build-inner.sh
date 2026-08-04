@@ -5,7 +5,7 @@
 set -euo pipefail
 
 TARGET="${1:-all}"
-BOARD="nice_nano//zmk"
+BOARD="nice_nano_v2"
 CONFIG=/workspace/config
 
 # 1) Init the west workspace once (.west persists in the mounted repo dir).
