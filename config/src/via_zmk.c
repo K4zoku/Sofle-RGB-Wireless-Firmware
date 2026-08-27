@@ -10,6 +10,7 @@
 #include <raw_hid/events.h>
 #include <zmk/behavior.h>
 #include <zmk/keymap.h>
+#include <zmk/sensors.h>
 
 LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 
@@ -32,6 +33,8 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_CMD_MACRO_RESET 0x10
 #define VIA_CMD_GET_LAYER_COUNT 0x11
 #define VIA_CMD_GET_BUFFER 0x12
+#define VIA_CMD_GET_ENCODER 0x14
+#define VIA_CMD_SET_ENCODER 0x15
 #define VIA_CMD_SET_BUFFER 0x13
 #define VIA_CMD_UNHANDLED 0xFF
 
@@ -65,6 +68,7 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_MO_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(mo))
 #define VIA_TO_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(to))
 #define VIA_TOG_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(tog))
+#define VIA_INC_DEC_KP_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(inc_dec_kp))
 #define VIA_TRANS_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(trans))
 #define VIA_NONE_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(none))
 
@@ -395,6 +399,33 @@ static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint1
     return false;
 }
 
+static bool via_read_encoder(uint8_t layer, uint8_t encoder, bool clockwise,
+                             uint16_t *keycode) {
+    if (layer >= ZMK_KEYMAP_LAYERS_LEN || encoder >= ZMK_KEYMAP_SENSORS_LEN) {
+        return false;
+    }
+
+    const zmk_keymap_layer_id_t layer_id = zmk_keymap_layer_index_to_id(layer);
+    const struct zmk_behavior_binding *binding =
+        zmk_keymap_get_sensor_binding_at_idx(layer_id, encoder);
+    if (!binding || strcmp(binding->behavior_dev, VIA_INC_DEC_KP_BEHAVIOR) != 0) {
+        *keycode = QMK_KC_NO;
+        return true;
+    }
+
+    const uint32_t usage = clockwise ? binding->param1 : binding->param2;
+    uint8_t basic;
+    uint8_t qmk_mods;
+    if (!via_usage_to_qmk_basic(usage, &basic) ||
+        !via_zmk_mods_to_qmk(usage >> 24, &qmk_mods)) {
+        *keycode = QMK_KC_NO;
+        return true;
+    }
+
+    *keycode = ((uint16_t)qmk_mods << 8) | basic;
+    return true;
+}
+
 static bool via_slot_to_zmk_position(uint8_t row, uint8_t column, uint8_t *position) {
     if (row >= VIA_KEYMAP_ROWS || column >= VIA_KEYMAP_COLS) {
         return false;
@@ -612,6 +643,21 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
     case VIA_CMD_SET_BUFFER:
         handled = via_set_buffer(((uint16_t)report[1] << 8) | report[2], report[3], &report[4]);
         changed = handled && report[3] != 0;
+        break;
+    case VIA_CMD_GET_ENCODER: {
+        uint16_t keycode;
+        if (!via_read_encoder(report[1], report[2], report[3] != 0, &keycode)) {
+            handled = false;
+        } else {
+            report[4] = keycode >> 8;
+            report[5] = keycode;
+        }
+        break;
+    }
+    case VIA_CMD_SET_ENCODER:
+        /* Rotation is read-only for now; encoder push switches use keymap commands. */
+        handled = report[1] < ZMK_KEYMAP_LAYERS_LEN &&
+                  report[2] < ZMK_KEYMAP_SENSORS_LEN && report[3] <= 1;
         break;
     default:
         handled = false;

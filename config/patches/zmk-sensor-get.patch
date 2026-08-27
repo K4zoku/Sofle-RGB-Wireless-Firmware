@@ -1,0 +1,46 @@
+diff --git a/app/include/zmk/keymap.h b/app/include/zmk/keymap.h
+index 9b7a00c6..62f5f2b3 100644
+--- a/app/include/zmk/keymap.h
++++ b/app/include/zmk/keymap.h
+@@ -48,6 +48,13 @@ const struct zmk_behavior_binding *zmk_keymap_get_layer_binding_at_idx(zmk_keyma
+                                                                        uint8_t binding_idx);
+ int zmk_keymap_set_layer_binding_at_idx(zmk_keymap_layer_id_t layer, uint8_t binding_idx,
+                                         const struct zmk_behavior_binding binding);
++/**
++ * @brief Get the static sensor binding for a layer and sensor index.
++ *
++ * This is read-only; sensor bindings are currently compiled from Devicetree.
++ */
++const struct zmk_behavior_binding *zmk_keymap_get_sensor_binding_at_idx(
++    zmk_keymap_layer_id_t layer, uint8_t sensor_idx);
+ 
+ #if IS_ENABLED(CONFIG_ZMK_KEYMAP_LAYER_REORDERING)
+ 
+diff --git a/app/src/keymap.c b/app/src/keymap.c
+index 762dd4f4..622c5c82 100644
+--- a/app/src/keymap.c
++++ b/app/src/keymap.c
+@@ -101,11 +101,22 @@ static const char *zmk_keymap_layer_names[ZMK_KEYMAP_LAYERS_LEN] = {
+ #endif
+ 
+ #if ZMK_KEYMAP_HAS_SENSORS
+-
+ static struct zmk_behavior_binding
+     zmk_sensor_keymap[ZMK_KEYMAP_LAYERS_LEN][ZMK_KEYMAP_SENSORS_LEN] = {
+         DT_INST_FOREACH_CHILD_SEP(0, SENSOR_LAYER, (, ))};
+ 
++const struct zmk_behavior_binding *
++zmk_keymap_get_sensor_binding_at_idx(zmk_keymap_layer_id_t layer, uint8_t sensor_idx) {
++    if (layer >= ZMK_KEYMAP_LAYERS_LEN || sensor_idx >= ZMK_KEYMAP_SENSORS_LEN) {
++        return NULL;
++    }
++    return &zmk_sensor_keymap[layer][sensor_idx];
++}
++#else
++const struct zmk_behavior_binding *
++zmk_keymap_get_sensor_binding_at_idx(zmk_keymap_layer_id_t layer, uint8_t sensor_idx) {
++    return NULL;
++}
+ #endif /* ZMK_KEYMAP_HAS_SENSORS */
+ 
+ #define ASSERT_LAYER_VAL(_layer, _fail_ret)                                                        \
