@@ -11,6 +11,9 @@
 #include <zmk/behavior.h>
 #include <zmk/keymap.h>
 #include <zmk/sensors.h>
+#include <dt-bindings/zmk/bt.h>
+#include <dt-bindings/zmk/ext_power.h>
+#include <dt-bindings/zmk/rgb.h>
 
 LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 
@@ -61,6 +64,8 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define QMK_QK_TOGGLE_LAYER_MAX 0x527F
 #define QMK_QK_LAYER_MOD 0x5000
 #define QMK_QK_LAYER_MOD_MAX 0x51FF
+#define VIA_CUSTOM_KEYCODE_BASE 0x7E00
+#define VIA_CUSTOM_KEYCODE_LAST 0x7E0E
 
 #define VIA_KP_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(kp))
 #define VIA_MT_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(mt))
@@ -71,6 +76,9 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_INC_DEC_KP_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(inc_dec_kp))
 #define VIA_TRANS_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(trans))
 #define VIA_NONE_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(none))
+#define VIA_BT_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(bt))
+#define VIA_EXT_POWER_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(ext_power))
+#define VIA_RGB_UG_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(rgb_ug))
 
 BUILD_ASSERT(VIA_REPORT_SIZE == 32, "Stock VIA requires 32-byte Raw HID reports");
 
@@ -242,6 +250,89 @@ static bool via_usage_to_qmk_basic(uint32_t usage, uint8_t *keycode) {
     return false;
 }
 
+static bool via_custom_keycode_to_binding(uint16_t keycode,
+                                          struct zmk_behavior_binding *binding) {
+    if (keycode < VIA_CUSTOM_KEYCODE_BASE || keycode > VIA_CUSTOM_KEYCODE_LAST) {
+        return false;
+    }
+
+    switch (keycode - VIA_CUSTOM_KEYCODE_BASE) {
+    case 0:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_BT_BEHAVIOR,
+            .param1 = BT_CLR_CMD,
+        };
+        return true;
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_BT_BEHAVIOR,
+            .param1 = BT_SEL_CMD,
+            .param2 = keycode - VIA_CUSTOM_KEYCODE_BASE - 1,
+        };
+        return true;
+    case 6:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_EXT_POWER_BEHAVIOR,
+            .param1 = EXT_POWER_TOGGLE_CMD,
+        };
+        return true;
+    case 7:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
+            .param1 = RGB_HUD_CMD,
+        };
+        return true;
+    case 8:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
+            .param1 = RGB_HUI_CMD,
+        };
+        return true;
+    case 9:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
+            .param1 = RGB_SAD_CMD,
+        };
+        return true;
+    case 10:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
+            .param1 = RGB_SAI_CMD,
+        };
+        return true;
+    case 11:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
+            .param1 = RGB_EFF_CMD,
+        };
+        return true;
+    case 12:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
+            .param1 = RGB_BRD_CMD,
+        };
+        return true;
+    case 13:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
+            .param1 = RGB_BRI_CMD,
+        };
+        return true;
+    case 14:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
+            .param1 = RGB_TOG_CMD,
+        };
+        return true;
+    default:
+        return false;
+    }
+}
+
 static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *binding) {
     uint32_t usage;
 
@@ -251,6 +342,9 @@ static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *bi
     }
     if (keycode == QMK_KC_TRANSPARENT) {
         *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_TRANS_BEHAVIOR};
+        return true;
+    }
+    if (via_custom_keycode_to_binding(keycode, binding)) {
         return true;
     }
 
@@ -337,6 +431,60 @@ static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *bi
     return true;
 }
 
+static bool via_binding_to_custom_keycode(const struct zmk_behavior_binding *binding,
+                                          uint16_t *keycode) {
+    if (!binding || !binding->behavior_dev) {
+        return false;
+    }
+
+    if (strcmp(binding->behavior_dev, VIA_BT_BEHAVIOR) == 0) {
+        if (binding->param1 == BT_CLR_CMD && binding->param2 == 0) {
+            *keycode = VIA_CUSTOM_KEYCODE_BASE;
+            return true;
+        }
+        if (binding->param1 == BT_SEL_CMD && binding->param2 < 5) {
+            *keycode = VIA_CUSTOM_KEYCODE_BASE + 1 + binding->param2;
+            return true;
+        }
+    }
+    if (strcmp(binding->behavior_dev, VIA_EXT_POWER_BEHAVIOR) == 0 &&
+        binding->param1 == EXT_POWER_TOGGLE_CMD && binding->param2 == 0) {
+        *keycode = VIA_CUSTOM_KEYCODE_BASE + 6;
+        return true;
+    }
+    if (strcmp(binding->behavior_dev, VIA_RGB_UG_BEHAVIOR) == 0 && binding->param2 == 0) {
+        switch (binding->param1) {
+        case RGB_HUD_CMD:
+            *keycode = VIA_CUSTOM_KEYCODE_BASE + 7;
+            return true;
+        case RGB_HUI_CMD:
+            *keycode = VIA_CUSTOM_KEYCODE_BASE + 8;
+            return true;
+        case RGB_SAD_CMD:
+            *keycode = VIA_CUSTOM_KEYCODE_BASE + 9;
+            return true;
+        case RGB_SAI_CMD:
+            *keycode = VIA_CUSTOM_KEYCODE_BASE + 10;
+            return true;
+        case RGB_EFF_CMD:
+            *keycode = VIA_CUSTOM_KEYCODE_BASE + 11;
+            return true;
+        case RGB_BRD_CMD:
+            *keycode = VIA_CUSTOM_KEYCODE_BASE + 12;
+            return true;
+        case RGB_BRI_CMD:
+            *keycode = VIA_CUSTOM_KEYCODE_BASE + 13;
+            return true;
+        case RGB_TOG_CMD:
+            *keycode = VIA_CUSTOM_KEYCODE_BASE + 14;
+            return true;
+        default:
+            break;
+        }
+    }
+    return false;
+}
+
 static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint16_t *keycode) {
     uint8_t basic;
     uint8_t qmk_mods;
@@ -350,6 +498,9 @@ static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint1
     }
     if (strcmp(binding->behavior_dev, VIA_TRANS_BEHAVIOR) == 0) {
         *keycode = QMK_KC_TRANSPARENT;
+        return true;
+    }
+    if (via_binding_to_custom_keycode(binding, keycode)) {
         return true;
     }
     if (strcmp(binding->behavior_dev, VIA_KP_BEHAVIOR) == 0 &&
@@ -464,7 +615,13 @@ static bool via_make_binding(uint16_t keycode, struct zmk_behavior_binding *bind
     if (!via_qmk_to_binding(keycode, binding)) {
         return false;
     }
-    return zmk_behavior_validate_binding(binding) >= 0;
+    if (zmk_behavior_validate_binding(binding) >= 0) {
+        return true;
+    }
+    /* ext_power has no metadata provider in ZMK 0.3, but this fixed custom
+     * binding is already part of the stock Sofle keymap. */
+    return strcmp(binding->behavior_dev, VIA_EXT_POWER_BEHAVIOR) == 0 &&
+           binding->param1 == EXT_POWER_TOGGLE_CMD && binding->param2 == 0;
 }
 
 static bool via_write_keycode(uint8_t layer, uint8_t row, uint8_t column, uint16_t keycode) {
