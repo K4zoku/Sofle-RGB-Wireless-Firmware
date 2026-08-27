@@ -4,3 +4,4 @@ zmk/
 zephyr/
 modules/
 build/
+zmk-raw-hid/

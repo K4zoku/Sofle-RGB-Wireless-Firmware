@@ -1,0 +1,9 @@
+menuconfig ZMK_VIA
+    bool "VIA compatibility for ZMK"
+    depends on RAW_HID
+    depends on ZMK_SPLIT_ROLE_CENTRAL
+    depends on ZMK_KEYMAP_SETTINGS_STORAGE
+    default y
+    help
+      Expose the current ZMK runtime keymap through the QMK/VIA Raw HID
+      protocol. Changes are saved through the normal ZMK keymap settings API.

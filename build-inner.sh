@@ -15,15 +15,20 @@ if [ ! -d /workspace/.west ]; then
 fi
 
 echo "==> west update"
+
 west update
+RAW_HID_REV="6a37765dfab6197292e7a9f47305dcf87386d56a"
+RAW_HID_PATCH="${CONFIG}/patches/zmk-raw-hid-via-descriptor.patch"
+git -C /workspace/zmk-raw-hid reset --hard "${RAW_HID_REV}" >/dev/null
+git -C /workspace/zmk-raw-hid apply "${RAW_HID_PATCH}"
 echo "==> west zephyr-export"
 west zephyr-export
 
 build_left() {
   # Central half: ZMK Studio over USB (snippet) + Studio Kconfig flags.
-  west build -s /workspace/zmk/app -b "${BOARD}" -d /workspace/build/sofle_left \
+  west build -p always -s /workspace/zmk/app -b "${BOARD}" -d /workspace/build/sofle_left \
     -S studio-rpc-usb-uart -- \
-    -DSHIELD=sofle_left -DZMK_CONFIG="${CONFIG}" \
+    -DSHIELD="sofle_left raw_hid_adapter" -DZMK_CONFIG="${CONFIG}" \
     -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n \
     -DCONFIG_ZMK_STUDIO_LOCK_ON_DISCONNECT=n
 }
