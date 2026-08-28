@@ -1,7 +1,6 @@
 menuconfig ZMK_VIA
     bool "VIA compatibility for ZMK"
     depends on RAW_HID
-    depends on ZMK_SPLIT_ROLE_CENTRAL
     depends on ZMK_KEYMAP_SETTINGS_STORAGE
     depends on DT_HAS_ZMK_VIA_MATRIX_ENABLED
     default y

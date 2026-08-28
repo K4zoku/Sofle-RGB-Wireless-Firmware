@@ -46,21 +46,27 @@ build_settings_reset() {
   west build -s /workspace/zmk/app -b "${BOARD}" -d /workspace/build/settings_reset -- \
     -DSHIELD=settings_reset -DZMK_CONFIG="${CONFIG}"
 }
+build_pipar_flake() {
+  west build -p always -s /workspace/zmk/app -b "${BOARD}" -d /workspace/build/pipar_flake -- \
+    -DSHIELD="pipar_flake raw_hid_adapter" -DZMK_CONFIG="${CONFIG}"
+}
+
 
 build_all() {
   build_left
   build_right
   build_settings_reset
+  build_pipar_flake
 }
-
 case "${TARGET}" in
   all)            build_all ;;
   sofle_left)     build_left ;;
   sofle_right)    build_right ;;
   settings_reset) build_settings_reset ;;
+  pipar_flake)    build_pipar_flake ;;
   *)
     echo "Unknown target: ${TARGET}" >&2
-    echo "Usage: build-local.sh [all|sofle_left|sofle_right|settings_reset]" >&2
+    echo "Usage: build-local.sh [all|sofle_left|sofle_right|settings_reset|pipar_flake]" >&2
     exit 1
     ;;
 esac
