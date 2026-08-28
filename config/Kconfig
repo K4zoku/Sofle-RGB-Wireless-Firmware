@@ -18,3 +18,10 @@ config ZMK_VIA_ENCODER_READ
     bool "Expose static encoder bindings to VIA"
     depends on ZMK_VIA
     default n
+
+
+config ZMK_VIA_CUSTOM_KEYCODE_PROFILE
+    int "VIA custom keycode profile"
+    depends on ZMK_VIA_CUSTOM_KEYCODES
+    range 0 1
+    default 0

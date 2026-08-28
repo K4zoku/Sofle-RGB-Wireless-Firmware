@@ -68,7 +68,11 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define QMK_QK_LAYER_MOD 0x5000
 #define QMK_QK_LAYER_MOD_MAX 0x51FF
 #define VIA_CUSTOM_KEYCODE_BASE 0x7E00
+#if CONFIG_ZMK_VIA_CUSTOM_KEYCODE_PROFILE == 1
+#define VIA_CUSTOM_KEYCODE_LAST 0x7E03
+#else
 #define VIA_CUSTOM_KEYCODE_LAST 0x7E0E
+#endif
 
 #if DT_NODE_EXISTS(DT_NODELABEL(kp))
 #define VIA_KP_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(kp))
@@ -129,6 +133,16 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_RGB_UG_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(rgb_ug))
 #else
 #define VIA_RGB_UG_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(sys_reset))
+#define VIA_SYS_RESET_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(sys_reset))
+#else
+#define VIA_SYS_RESET_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(bootloader))
+#define VIA_BOOTLOADER_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(bootloader))
+#else
+#define VIA_BOOTLOADER_BEHAVIOR ""
 #endif
 
 BUILD_ASSERT(VIA_REPORT_SIZE == 32, "Stock VIA requires 32-byte Raw HID reports");
@@ -298,6 +312,34 @@ static bool via_custom_keycode_to_binding(uint16_t keycode,
     if (keycode < VIA_CUSTOM_KEYCODE_BASE || keycode > VIA_CUSTOM_KEYCODE_LAST) {
         return false;
     }
+#if CONFIG_ZMK_VIA_CUSTOM_KEYCODE_PROFILE == 1
+    switch (keycode - VIA_CUSTOM_KEYCODE_BASE) {
+    case 0:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_BT_BEHAVIOR,
+            .param1 = BT_NXT_CMD,
+        };
+        return true;
+    case 1:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_BT_BEHAVIOR,
+            .param1 = BT_CLR_CMD,
+        };
+        return true;
+    case 2:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_SYS_RESET_BEHAVIOR,
+        };
+        return true;
+    case 3:
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_BOOTLOADER_BEHAVIOR,
+        };
+        return true;
+    default:
+        return false;
+    }
+#else
 
     switch (keycode - VIA_CUSTOM_KEYCODE_BASE) {
     case 0:
@@ -374,6 +416,7 @@ static bool via_custom_keycode_to_binding(uint16_t keycode,
     default:
         return false;
     }
+#endif
 #else
     (void)keycode;
     (void)binding;
@@ -485,6 +528,30 @@ static bool via_binding_to_custom_keycode(const struct zmk_behavior_binding *bin
     if (!binding || !binding->behavior_dev) {
         return false;
     }
+#if CONFIG_ZMK_VIA_CUSTOM_KEYCODE_PROFILE == 1
+    if (strcmp(binding->behavior_dev, VIA_BT_BEHAVIOR) == 0 &&
+        binding->param2 == 0) {
+        if (binding->param1 == BT_NXT_CMD) {
+            *keycode = VIA_CUSTOM_KEYCODE_BASE;
+            return true;
+        }
+        if (binding->param1 == BT_CLR_CMD) {
+            *keycode = VIA_CUSTOM_KEYCODE_BASE + 1;
+            return true;
+        }
+    }
+    if (strcmp(binding->behavior_dev, VIA_SYS_RESET_BEHAVIOR) == 0 &&
+        binding->param1 == 0 && binding->param2 == 0) {
+        *keycode = VIA_CUSTOM_KEYCODE_BASE + 2;
+        return true;
+    }
+    if (strcmp(binding->behavior_dev, VIA_BOOTLOADER_BEHAVIOR) == 0 &&
+        binding->param1 == 0 && binding->param2 == 0) {
+        *keycode = VIA_CUSTOM_KEYCODE_BASE + 3;
+        return true;
+    }
+    return false;
+#else
 
     if (strcmp(binding->behavior_dev, VIA_BT_BEHAVIOR) == 0) {
         if (binding->param1 == BT_CLR_CMD && binding->param2 == 0) {
@@ -532,6 +599,7 @@ static bool via_binding_to_custom_keycode(const struct zmk_behavior_binding *bin
         }
     }
     return false;
+#endif
 #else
     (void)binding;
     (void)keycode;
@@ -680,10 +748,13 @@ static bool via_make_binding(uint16_t keycode, struct zmk_behavior_binding *bind
     if (zmk_behavior_validate_binding(binding) >= 0) {
         return true;
     }
-    /* ext_power has no metadata provider in ZMK 0.3, but this fixed custom
-     * binding is already part of the stock Sofle keymap. */
-    return strcmp(binding->behavior_dev, VIA_EXT_POWER_BEHAVIOR) == 0 &&
-           binding->param1 == EXT_POWER_TOGGLE_CMD && binding->param2 == 0;
+    /* These core ZMK behaviors have no metadata provider in this revision. */
+    return (strcmp(binding->behavior_dev, VIA_EXT_POWER_BEHAVIOR) == 0 &&
+            binding->param1 == EXT_POWER_TOGGLE_CMD && binding->param2 == 0) ||
+           (strcmp(binding->behavior_dev, VIA_SYS_RESET_BEHAVIOR) == 0 &&
+            binding->param1 == 0 && binding->param2 == 0) ||
+           (strcmp(binding->behavior_dev, VIA_BOOTLOADER_BEHAVIOR) == 0 &&
+            binding->param1 == 0 && binding->param2 == 0);
 }
 
 static bool via_write_keycode(uint8_t layer, uint8_t row, uint8_t column, uint16_t keycode) {
