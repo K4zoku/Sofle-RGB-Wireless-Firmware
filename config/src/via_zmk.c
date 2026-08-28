@@ -614,6 +614,51 @@ static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint1
     return false;
 }
 
+static bool via_qmk_to_encoder_param(uint16_t keycode, uint32_t *param) {
+    if (keycode == QMK_KC_NO) {
+        *param = 0;
+        return true;
+    }
+
+    struct zmk_behavior_binding binding;
+    if (!via_qmk_to_binding(keycode, &binding) || !binding.behavior_dev ||
+        strcmp(binding.behavior_dev, VIA_KP_BEHAVIOR) != 0) {
+        return false;
+    }
+
+    *param = binding.param1;
+    return true;
+}
+
+static bool via_write_encoder(uint8_t layer, uint8_t encoder, bool clockwise,
+                              uint16_t keycode) {
+    if (layer >= ZMK_KEYMAP_LAYERS_LEN || encoder >= ZMK_KEYMAP_SENSORS_LEN) {
+        return false;
+    }
+
+    const zmk_keymap_layer_id_t layer_id = zmk_keymap_layer_index_to_id(layer);
+    const struct zmk_behavior_binding *current =
+        zmk_keymap_get_sensor_binding_at_idx(layer_id, encoder);
+    if (!current || !current->behavior_dev ||
+        strcmp(current->behavior_dev, VIA_INC_DEC_KP_BEHAVIOR) != 0) {
+        return false;
+    }
+
+    uint32_t param;
+    if (!via_qmk_to_encoder_param(keycode, &param)) {
+        return false;
+    }
+
+    struct zmk_behavior_binding updated = *current;
+    if (clockwise) {
+        updated.param1 = param;
+    } else {
+        updated.param2 = param;
+    }
+
+    return zmk_keymap_set_sensor_binding_at_idx(layer_id, encoder, updated) >= 0;
+}
+
 static bool via_read_encoder(uint8_t layer, uint8_t encoder, bool clockwise,
                              uint16_t *keycode) {
     if (layer >= ZMK_KEYMAP_LAYERS_LEN || encoder >= ZMK_KEYMAP_SENSORS_LEN) {
@@ -623,12 +668,18 @@ static bool via_read_encoder(uint8_t layer, uint8_t encoder, bool clockwise,
     const zmk_keymap_layer_id_t layer_id = zmk_keymap_layer_index_to_id(layer);
     const struct zmk_behavior_binding *binding =
         zmk_keymap_get_sensor_binding_at_idx(layer_id, encoder);
-    if (!binding || strcmp(binding->behavior_dev, VIA_INC_DEC_KP_BEHAVIOR) != 0) {
+    if (!binding || !binding->behavior_dev ||
+        strcmp(binding->behavior_dev, VIA_INC_DEC_KP_BEHAVIOR) != 0) {
         *keycode = QMK_KC_NO;
         return true;
     }
 
     const uint32_t usage = clockwise ? binding->param1 : binding->param2;
+    if (usage == 0) {
+        *keycode = QMK_KC_NO;
+        return true;
+    }
+
     uint8_t basic;
     uint8_t qmk_mods;
     if (!via_usage_to_qmk_basic(usage, &basic) ||
@@ -975,9 +1026,13 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
         break;
     }
     case VIA_CMD_SET_ENCODER:
-        /* Rotation is read-only for now; encoder push switches use keymap commands. */
-        handled = report[1] < ZMK_KEYMAP_LAYERS_LEN &&
-                  report[2] < ZMK_KEYMAP_SENSORS_LEN && report[3] <= 1;
+        if (report[3] > 1) {
+            handled = false;
+            break;
+        }
+        changed = via_write_encoder(report[1], report[2], report[3] != 0,
+                                    ((uint16_t)report[4] << 8) | report[5]);
+        handled = changed;
         break;
     default:
         handled = false;
