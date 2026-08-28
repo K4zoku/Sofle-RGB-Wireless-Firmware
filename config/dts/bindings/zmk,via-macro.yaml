@@ -1,0 +1,3 @@
+description: Runtime macro behavior backed by the VIA macro buffer
+compatible: "zmk,via-macro"
+include: one_param.yaml

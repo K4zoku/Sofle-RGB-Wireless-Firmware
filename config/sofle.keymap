@@ -38,6 +38,13 @@
             55 56 57 58 59 0xFF 0xFF
         >;
     };
+
+    behaviors {
+        via_macro: via_macro {
+            compatible = "zmk,via-macro";
+            #binding-cells = <1>;
+        };
+    };
     // Activate ADJUST layer by pressing raise and lower
 
     conditional_layers {

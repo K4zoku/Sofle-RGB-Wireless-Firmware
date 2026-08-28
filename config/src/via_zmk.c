@@ -8,6 +8,7 @@
 #include <drivers/behavior.h>
 #include <dt-bindings/zmk/modifiers.h>
 #include <raw_hid/events.h>
+#include <via_macro.h>
 #include <zmk/behavior.h>
 #include <zmk/keymap.h>
 #include <zmk/physical_layouts.h>
@@ -77,6 +78,9 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define QMK_QK_TOGGLE_LAYER_MAX 0x527F
 #define QMK_QK_LAYER_MOD 0x5000
 #define QMK_QK_LAYER_MOD_MAX 0x51FF
+
+#define QMK_QK_MACRO 0x7700
+#define QMK_QK_MACRO_MAX 0x777F
 #define VIA_CUSTOM_KEYCODE_BASE 0x7E00
 #define VIA_CUSTOM_KEYCODE_LAST 0x7E0E
 
@@ -124,6 +128,11 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_NONE_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(none))
 #else
 #define VIA_NONE_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(via_macro))
+#define VIA_MACRO_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(via_macro))
+#else
+#define VIA_MACRO_BEHAVIOR ""
 #endif
 #if DT_NODE_EXISTS(DT_NODELABEL(bt))
 #define VIA_BT_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(bt))
@@ -402,6 +411,17 @@ static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *bi
         *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_TRANS_BEHAVIOR};
         return true;
     }
+    if (keycode >= QMK_QK_MACRO && keycode <= QMK_QK_MACRO_MAX) {
+        const uint16_t id = keycode - QMK_QK_MACRO;
+        if (id >= zmk_via_macro_get_count() || !VIA_MACRO_BEHAVIOR[0]) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_MACRO_BEHAVIOR,
+            .param1 = id,
+        };
+        return true;
+    }
     if (via_custom_keycode_to_binding(keycode, binding)) {
         return true;
     }
@@ -562,6 +582,11 @@ static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint1
     }
     if (strcmp(binding->behavior_dev, VIA_TRANS_BEHAVIOR) == 0) {
         *keycode = QMK_KC_TRANSPARENT;
+        return true;
+    }
+    if (strcmp(binding->behavior_dev, VIA_MACRO_BEHAVIOR) == 0 &&
+        binding->param1 < zmk_via_macro_get_count()) {
+        *keycode = QMK_QK_MACRO + binding->param1;
         return true;
     }
     if (via_binding_to_custom_keycode(binding, keycode)) {
@@ -737,6 +762,10 @@ static bool via_make_binding(uint16_t keycode, struct zmk_behavior_binding *bind
     if (zmk_behavior_validate_binding(binding) >= 0) {
         return true;
     }
+    if (strcmp(binding->behavior_dev, VIA_MACRO_BEHAVIOR) == 0 &&
+        binding->param1 < zmk_via_macro_get_count()) {
+        return true;
+    }
     /* ext_power has no metadata provider in ZMK 0.3, but this fixed custom
      * binding is already part of the stock Sofle keymap. */
     return strcmp(binding->behavior_dev, VIA_EXT_POWER_BEHAVIOR) == 0 &&
@@ -840,6 +869,20 @@ static void via_write_u32(uint8_t *data, uint32_t value) {
     data[1] = value >> 16;
     data[2] = value >> 8;
     data[3] = value;
+}
+
+static bool via_get_macro_buffer(uint16_t offset, uint8_t size, uint8_t *data) {
+    const size_t buffer_size = zmk_via_macro_get_buffer_size();
+    if (size > VIA_REPORT_SIZE - 4 || (size_t)offset > buffer_size) {
+        return false;
+    }
+
+    const size_t available = MIN((size_t)size, buffer_size - offset);
+    if (zmk_via_macro_get_buffer(offset, available, data) < 0) {
+        return false;
+    }
+    memset(data + available, 0, size - available);
+    return true;
 }
 
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
@@ -991,20 +1034,33 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
         handled = changed;
         break;
     case VIA_CMD_MACRO_GET_COUNT:
-        report[1] = 0;
+        report[1] = zmk_via_macro_get_count();
         break;
-    case VIA_CMD_MACRO_GET_BUFFER_SIZE:
-        report[1] = 0;
-        report[2] = 0;
+    case VIA_CMD_MACRO_GET_BUFFER_SIZE: {
+        const size_t size = zmk_via_macro_get_buffer_size();
+        report[1] = size >> 8;
+        report[2] = size;
         break;
+    }
     case VIA_CMD_MACRO_GET_BUFFER:
-        handled = report[3] == 0;
+        handled = via_get_macro_buffer(((uint16_t)report[1] << 8) | report[2], report[3],
+                                       &report[4]);
         break;
-    case VIA_CMD_MACRO_SET_BUFFER:
-        handled = report[3] == 0;
+    case VIA_CMD_MACRO_SET_BUFFER: {
+        const int ret = report[3] <= VIA_REPORT_SIZE - 4
+                            ? zmk_via_macro_set_buffer(
+                                  ((uint16_t)report[1] << 8) | report[2], report[3], &report[4])
+                            : -EINVAL;
+        handled = ret >= 0;
+        changed = ret > 0;
         break;
-    case VIA_CMD_MACRO_RESET:
+    }
+    case VIA_CMD_MACRO_RESET: {
+        const int ret = zmk_via_macro_reset();
+        handled = ret >= 0;
+        changed = ret > 0;
         break;
+    }
     case VIA_CMD_GET_LAYER_COUNT:
         report[1] = ZMK_KEYMAP_LAYERS_LEN;
         break;
@@ -1054,6 +1110,11 @@ static void via_save_work_handler(struct k_work *work) {
     int ret = zmk_keymap_save_changes();
     if (ret < 0) {
         LOG_ERR("Failed to persist VIA keymap changes: %d", ret);
+    }
+
+    ret = zmk_via_macro_save_changes();
+    if (ret < 0) {
+        LOG_ERR("Failed to persist VIA macro changes: %d", ret);
     }
 }
 
