@@ -637,10 +637,14 @@ static bool via_slot_to_zmk_position(uint8_t row, uint8_t column, uint8_t *posit
     }
 
     *position = via_position_map[row * VIA_KEYMAP_COLS + column];
+    if (*position == UINT8_MAX || *position >= ZMK_KEYMAP_LEN) {
+        return false;
+    }
+
     const uint32_t *selected_to_stock;
     const int selected_length =
         zmk_physical_layouts_get_selected_to_stock_position_map(&selected_to_stock);
-    return selected_length > 0 && *position != UINT8_MAX && *position < selected_length &&
+    return selected_length > 0 && *position < selected_length &&
            selected_to_stock[*position] < ZMK_KEYMAP_LEN;
 }
 
