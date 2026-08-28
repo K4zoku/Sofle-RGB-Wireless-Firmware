@@ -21,6 +21,8 @@ ZMK_REV="edf5c0814fd3ea202e43aad2d68fd32e882a518c"
 ZMK_PATCH="${CONFIG}/patches/zmk-sensor-get.patch"
 git -C /workspace/zmk reset --hard "${ZMK_REV}" >/dev/null
 git -C /workspace/zmk apply "${ZMK_PATCH}"
+ZMK_ENCODER_PATCH="${CONFIG}/patches/zmk-encoder-persistence.patch"
+git -C /workspace/zmk apply "${ZMK_ENCODER_PATCH}"
 RAW_HID_REV="6a37765dfab6197292e7a9f47305dcf87386d56a"
 RAW_HID_PATCH="${CONFIG}/patches/zmk-raw-hid-via-descriptor.patch"
 git -C /workspace/zmk-raw-hid reset --hard "${RAW_HID_REV}" >/dev/null
