@@ -1,0 +1,61 @@
+diff --git a/app/include/zmk/rgb_underglow.h b/app/include/zmk/rgb_underglow.h
+index be0ef252..2943df54 100644
+--- a/app/include/zmk/rgb_underglow.h
++++ b/app/include/zmk/rgb_underglow.h
+@@ -14,6 +14,11 @@ struct zmk_led_hsb {
+ 
+ int zmk_rgb_underglow_toggle(void);
+ int zmk_rgb_underglow_get_state(bool *state);
++int zmk_rgb_underglow_get_hsb(struct zmk_led_hsb *color);
++int zmk_rgb_underglow_get_effect(void);
++int zmk_rgb_underglow_get_speed(void);
++int zmk_rgb_underglow_set_speed(uint8_t speed);
++int zmk_rgb_underglow_save_state(void);
+ int zmk_rgb_underglow_on(void);
+ int zmk_rgb_underglow_off(void);
+ int zmk_rgb_underglow_cycle_effect(int direction);
+diff --git a/app/src/rgb_underglow.c b/app/src/rgb_underglow.c
+index 3453fb44..07bf3467 100644
+--- a/app/src/rgb_underglow.c
++++ b/app/src/rgb_underglow.c
+@@ -297,6 +297,23 @@ int zmk_rgb_underglow_get_state(bool *on_off) {
+     return 0;
+ }
+ 
++int zmk_rgb_underglow_get_hsb(struct zmk_led_hsb *color) {
++    if (!led_strip) {
++        return -ENODEV;
++    }
++
++    *color = state.color;
++    return 0;
++}
++
++int zmk_rgb_underglow_get_effect(void) {
++    return state.current_effect;
++}
++
++int zmk_rgb_underglow_get_speed(void) {
++    return state.animation_speed;
++}
++
+ int zmk_rgb_underglow_on(void) {
+     if (!led_strip)
+         return -ENODEV;
+@@ -383,6 +400,16 @@ int zmk_rgb_underglow_set_hsb(struct zmk_led_hsb color) {
+ 
+     return 0;
+ }
++int zmk_rgb_underglow_set_speed(uint8_t speed) {
++    if (!led_strip) {
++        return -ENODEV;
++    }
++    if (speed < 1 || speed > 5) {
++        return -EINVAL;
++    }
++    state.animation_speed = speed;
++    return 0;
++}
+ 
+ struct zmk_led_hsb zmk_rgb_underglow_calc_hue(int direction) {
+     struct zmk_led_hsb color = state.color;

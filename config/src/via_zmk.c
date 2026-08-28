@@ -13,6 +13,7 @@
 #include <zmk/physical_layouts.h>
 #include <zmk/matrix.h>
 #include <zmk/sensors.h>
+#include <zmk/rgb_underglow.h>
 #include <dt-bindings/zmk/bt.h>
 #include <dt-bindings/zmk/ext_power.h>
 #include <dt-bindings/zmk/rgb.h>
@@ -43,6 +44,15 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_CMD_SET_ENCODER 0x15
 #define VIA_CMD_SET_BUFFER 0x13
 #define VIA_CMD_UNHANDLED 0xFF
+#define VIA_CMD_CUSTOM_SET_VALUE 0x07
+#define VIA_CMD_CUSTOM_GET_VALUE 0x08
+#define VIA_CMD_CUSTOM_SAVE 0x09
+#define VIA_RGBLIGHT_CHANNEL 0x02
+#define VIA_RGB_BRIGHTNESS 0x01
+#define VIA_RGB_EFFECT 0x02
+#define VIA_RGB_EFFECT_SPEED 0x03
+#define VIA_RGB_COLOR 0x04
+#define VIA_RGB_EFFECT_COUNT 4
 
 #define VIA_VALUE_UPTIME 0x01
 #define VIA_VALUE_LAYOUT_OPTIONS 0x02
@@ -781,6 +791,75 @@ static void via_write_u32(uint8_t *data, uint32_t value) {
     data[3] = value;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+static bool via_rgb_get_value(uint8_t *report) {
+    if (report[1] != VIA_RGBLIGHT_CHANNEL) {
+        return false;
+    }
+
+    struct zmk_led_hsb color;
+    bool on;
+    if (zmk_rgb_underglow_get_state(&on) < 0 ||
+        zmk_rgb_underglow_get_hsb(&color) < 0) {
+        return false;
+    }
+
+    switch (report[2]) {
+    case VIA_RGB_BRIGHTNESS:
+        report[3] = ((uint16_t)color.b * UINT8_MAX) / 100;
+        return true;
+    case VIA_RGB_EFFECT: {
+        const int effect = zmk_rgb_underglow_get_effect();
+        report[3] = on && effect >= 0 && effect < VIA_RGB_EFFECT_COUNT ? effect + 1 : 0;
+        return true;
+    }
+    case VIA_RGB_EFFECT_SPEED:
+        report[3] = ((uint16_t)zmk_rgb_underglow_get_speed() * UINT8_MAX) / 5;
+        return true;
+    case VIA_RGB_COLOR:
+        report[3] = ((uint32_t)color.h * UINT8_MAX) / 360;
+        report[4] = ((uint16_t)color.s * UINT8_MAX) / 100;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool via_rgb_set_value(uint8_t *report) {
+    if (report[1] != VIA_RGBLIGHT_CHANNEL) {
+        return false;
+    }
+
+    struct zmk_led_hsb color;
+    if (zmk_rgb_underglow_get_hsb(&color) < 0) {
+        return false;
+    }
+
+    switch (report[2]) {
+    case VIA_RGB_BRIGHTNESS:
+        color.b = ((uint16_t)report[3] * 100 + 127) / UINT8_MAX;
+        return zmk_rgb_underglow_set_hsb(color) >= 0;
+    case VIA_RGB_EFFECT:
+        if (report[3] == 0) {
+            return zmk_rgb_underglow_off() >= 0;
+        }
+        return report[3] <= VIA_RGB_EFFECT_COUNT &&
+               zmk_rgb_underglow_on() >= 0 &&
+               zmk_rgb_underglow_select_effect(report[3] - 1) >= 0;
+    case VIA_RGB_EFFECT_SPEED: {
+        const uint8_t speed = MAX(1, MIN(5, ((uint16_t)report[3] * 5 + 127) / UINT8_MAX));
+        return zmk_rgb_underglow_set_speed(speed) >= 0;
+    }
+    case VIA_RGB_COLOR:
+        color.h = ((uint32_t)report[3] * 360 + 127) / UINT8_MAX;
+        color.s = ((uint16_t)report[4] * 100 + 127) / UINT8_MAX;
+        return zmk_rgb_underglow_set_hsb(color) >= 0;
+    default:
+        return false;
+    }
+}
+#endif
+
 static bool via_handle_report(uint8_t *report, bool *changed_out) {
     bool changed = false;
     bool handled = true;
@@ -818,6 +897,28 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
         if (report[1] != VIA_VALUE_LAYOUT_OPTIONS && report[1] != VIA_VALUE_DEVICE_INDICATION) {
             handled = false;
         }
+        break;
+    case VIA_CMD_CUSTOM_SET_VALUE:
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+        handled = via_rgb_set_value(report);
+#else
+        handled = false;
+#endif
+        break;
+    case VIA_CMD_CUSTOM_GET_VALUE:
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+        handled = via_rgb_get_value(report);
+#else
+        handled = false;
+#endif
+        break;
+    case VIA_CMD_CUSTOM_SAVE:
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+        handled = report[1] == VIA_RGBLIGHT_CHANNEL &&
+                  zmk_rgb_underglow_save_state() >= 0;
+#else
+        handled = false;
+#endif
         break;
     case VIA_CMD_GET_KEYCODE: {
         uint16_t keycode;
