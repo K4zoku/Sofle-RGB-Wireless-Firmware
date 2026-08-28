@@ -10,6 +10,7 @@
 #include <raw_hid/events.h>
 #include <zmk/behavior.h>
 #include <zmk/keymap.h>
+#include <zmk/physical_layouts.h>
 #include <zmk/matrix.h>
 #include <zmk/sensors.h>
 #include <dt-bindings/zmk/bt.h>
@@ -636,7 +637,11 @@ static bool via_slot_to_zmk_position(uint8_t row, uint8_t column, uint8_t *posit
     }
 
     *position = via_position_map[row * VIA_KEYMAP_COLS + column];
-    return *position != UINT8_MAX && *position < ZMK_KEYMAP_LEN;
+    const uint32_t *selected_to_stock;
+    const int selected_length =
+        zmk_physical_layouts_get_selected_to_stock_position_map(&selected_to_stock);
+    return selected_length > 0 && *position != UINT8_MAX && *position < selected_length &&
+           selected_to_stock[*position] < ZMK_KEYMAP_LEN;
 }
 
 static bool via_read_keycode(uint8_t layer, uint8_t row, uint8_t column, uint16_t *keycode) {
