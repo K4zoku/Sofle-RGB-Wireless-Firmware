@@ -2,7 +2,7 @@
   "name": "Sofle ZMK VIA",
   "vendorId": "0x1D50",
   "productId": "0x615E",
-  "lighting": "qmk_rgblight",
+  "menus": ["qmk_rgblight"],
   "matrix": {
     "rows": 10,
     "cols": 7
