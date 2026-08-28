@@ -30,6 +30,27 @@ static uint8_t via_macro_buffer[CONFIG_ZMK_VIA_MACRO_BUFFER_SIZE];
 static bool via_macro_dirty;
 K_MUTEX_DEFINE(via_macro_mutex);
 
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
+static const struct behavior_parameter_value_metadata via_macro_param_values[] = {{
+    .display_name = "Macro ID",
+    .range = {
+        .min = 0,
+        .max = CONFIG_ZMK_VIA_MACRO_COUNT - 1,
+    },
+    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_RANGE,
+}};
+
+static const struct behavior_parameter_metadata_set via_macro_metadata_set = {
+    .param1_values = via_macro_param_values,
+    .param1_values_len = ARRAY_SIZE(via_macro_param_values),
+};
+
+static const struct behavior_parameter_metadata via_macro_metadata = {
+    .sets_len = 1,
+    .sets = &via_macro_metadata_set,
+};
+#endif
+
 int zmk_via_macro_get_count(void) {
     return CONFIG_ZMK_VIA_MACRO_COUNT;
 }
@@ -119,14 +140,124 @@ static int via_macro_handle_set(const char *name, size_t len, settings_read_cb r
     k_mutex_lock(&via_macro_mutex, K_FOREVER);
     memset(via_macro_buffer, 0, sizeof(via_macro_buffer));
     const int ret = read_cb(cb_arg, via_macro_buffer, len);
-    if (ret >= 0) {
-        via_macro_dirty = false;
+    if (ret < 0) {
+        k_mutex_unlock(&via_macro_mutex);
+        return ret;
     }
+    if ((size_t)ret != len) {
+        LOG_ERR("Short VIA macro setting read: %d/%d", ret, len);
+        k_mutex_unlock(&via_macro_mutex);
+        return -EIO;
+    }
+    via_macro_dirty = false;
     k_mutex_unlock(&via_macro_mutex);
-    return ret;
+    return 0;
 }
 
 SETTINGS_STATIC_HANDLER_DEFINE(via_macro, "via_macro", NULL, via_macro_handle_set, NULL, NULL);
+
+#define VIA_MACRO_ACTION_PREFIX 0x01
+#define VIA_MACRO_ACTION_TAP 0x01
+#define VIA_MACRO_ACTION_DOWN 0x02
+#define VIA_MACRO_ACTION_UP 0x03
+#define VIA_MACRO_ACTION_DELAY 0x04
+#define VIA_MACRO_DELAY_TERMINATOR '|'
+
+enum via_macro_action_kind {
+    VIA_MACRO_ACTION_END,
+    VIA_MACRO_ACTION_CHARACTER,
+    VIA_MACRO_ACTION_KEY_TAP,
+    VIA_MACRO_ACTION_KEY_DOWN,
+    VIA_MACRO_ACTION_KEY_UP,
+    VIA_MACRO_ACTION_WAIT,
+};
+
+struct via_macro_action {
+    enum via_macro_action_kind kind;
+    uint8_t keycode;
+    uint32_t delay_ms;
+    size_t next_offset;
+};
+
+static bool via_macro_find_start_locked(uint8_t id, size_t *offset) {
+    size_t current = 0;
+
+    for (uint8_t macro = 0; macro < id; macro++) {
+        while (current < ARRAY_SIZE(via_macro_buffer) && via_macro_buffer[current] != 0) {
+            current++;
+        }
+        if (current == ARRAY_SIZE(via_macro_buffer)) {
+            return false;
+        }
+        current++;
+    }
+
+    *offset = current;
+    return true;
+}
+
+static bool via_macro_parse_action_locked(size_t offset, struct via_macro_action *action) {
+    const size_t buffer_size = ARRAY_SIZE(via_macro_buffer);
+
+    if (offset >= buffer_size) {
+        action->kind = VIA_MACRO_ACTION_END;
+        action->next_offset = offset;
+        return true;
+    }
+
+    const uint8_t byte = via_macro_buffer[offset];
+    if (byte == 0) {
+        action->kind = VIA_MACRO_ACTION_END;
+        action->next_offset = offset + 1;
+        return true;
+    }
+
+    if (byte == VIA_MACRO_ACTION_PREFIX && offset + 1 < buffer_size) {
+        const uint8_t type = via_macro_buffer[offset + 1];
+        if ((type == VIA_MACRO_ACTION_TAP || type == VIA_MACRO_ACTION_DOWN ||
+             type == VIA_MACRO_ACTION_UP) &&
+            offset + 2 < buffer_size) {
+            action->kind = type == VIA_MACRO_ACTION_TAP
+                               ? VIA_MACRO_ACTION_KEY_TAP
+                               : (type == VIA_MACRO_ACTION_DOWN ? VIA_MACRO_ACTION_KEY_DOWN
+                                                                : VIA_MACRO_ACTION_KEY_UP);
+            action->keycode = via_macro_buffer[offset + 2];
+            action->next_offset = offset + 3;
+            return true;
+        }
+
+        if (type == VIA_MACRO_ACTION_DELAY) {
+            size_t cursor = offset + 2;
+            uint32_t delay = 0;
+            bool has_digits = false;
+
+            while (cursor < buffer_size && via_macro_buffer[cursor] !=
+                                                VIA_MACRO_DELAY_TERMINATOR) {
+                const uint8_t digit = via_macro_buffer[cursor];
+                if (digit < '0' || digit > '9' ||
+                    delay > (UINT32_MAX - (digit - '0')) / 10) {
+                    break;
+                }
+                delay = delay * 10 + (digit - '0');
+                has_digits = true;
+                cursor++;
+            }
+
+            if (has_digits && cursor < buffer_size &&
+                via_macro_buffer[cursor] == VIA_MACRO_DELAY_TERMINATOR) {
+                action->kind = VIA_MACRO_ACTION_WAIT;
+                action->delay_ms = delay;
+                action->next_offset = cursor + 1;
+                return true;
+            }
+        }
+    }
+
+    action->kind = VIA_MACRO_ACTION_CHARACTER;
+    action->keycode = byte;
+    action->next_offset = offset + 1;
+    return true;
+}
 
 static bool via_macro_char_to_binding(uint8_t c, struct zmk_behavior_binding *binding) {
     uint8_t usage_id;
@@ -293,55 +424,144 @@ static bool via_macro_char_to_binding(uint8_t c, struct zmk_behavior_binding *bi
     return true;
 }
 
+static bool via_macro_qmk_to_binding(uint8_t keycode, struct zmk_behavior_binding *binding) {
+    uint32_t usage;
+
+    if (!VIA_MACRO_KP_BEHAVIOR[0] || !via_qmk_basic_to_usage(keycode, &usage)) {
+        return false;
+    }
+
+    *binding = (struct zmk_behavior_binding){
+        .behavior_dev = VIA_MACRO_KP_BEHAVIOR,
+        .param1 = usage,
+    };
+    return true;
+}
+
+struct via_macro_executor_state {
+    struct zmk_behavior_binding_event event;
+    struct zmk_behavior_binding pending_binding;
+    size_t offset;
+    bool active;
+    bool pending_release;
+};
+
+static struct via_macro_executor_state via_macro_executor;
+
+static void via_macro_work_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(via_macro_work, via_macro_work_handler);
+
+static void via_macro_work_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+
+    struct via_macro_action action = {0};
+    struct zmk_behavior_binding binding = {0};
+    struct zmk_behavior_binding_event event = {0};
+    bool invoke = false;
+    bool pressed = false;
+    uint32_t wait_ms = 0;
+
+    k_mutex_lock(&via_macro_mutex, K_FOREVER);
+    if (!via_macro_executor.active) {
+        k_mutex_unlock(&via_macro_mutex);
+        return;
+    }
+
+    if (via_macro_executor.pending_release) {
+        binding = via_macro_executor.pending_binding;
+        event = via_macro_executor.event;
+        via_macro_executor.pending_release = false;
+        invoke = true;
+        wait_ms = CONFIG_ZMK_VIA_MACRO_DELAY_MS;
+    } else if (via_macro_buffer[ARRAY_SIZE(via_macro_buffer) - 1] != 0 ||
+               !via_macro_parse_action_locked(via_macro_executor.offset, &action)) {
+        via_macro_executor.active = false;
+    } else {
+        via_macro_executor.offset = action.next_offset;
+
+        switch (action.kind) {
+        case VIA_MACRO_ACTION_END:
+            via_macro_executor.active = false;
+            break;
+        case VIA_MACRO_ACTION_WAIT:
+            wait_ms = action.delay_ms;
+            break;
+        case VIA_MACRO_ACTION_KEY_TAP:
+            invoke = via_macro_qmk_to_binding(action.keycode, &binding);
+            pressed = true;
+            if (invoke) {
+                via_macro_executor.pending_binding = binding;
+                via_macro_executor.pending_release = true;
+            }
+            wait_ms = CONFIG_ZMK_VIA_MACRO_DELAY_MS;
+            break;
+        case VIA_MACRO_ACTION_KEY_DOWN:
+        case VIA_MACRO_ACTION_KEY_UP:
+            invoke = via_macro_qmk_to_binding(action.keycode, &binding);
+            pressed = action.kind == VIA_MACRO_ACTION_KEY_DOWN;
+            wait_ms = CONFIG_ZMK_VIA_MACRO_DELAY_MS;
+            break;
+        case VIA_MACRO_ACTION_CHARACTER:
+            invoke = via_macro_char_to_binding(action.keycode, &binding);
+            pressed = true;
+            if (invoke) {
+                via_macro_executor.pending_binding = binding;
+                via_macro_executor.pending_release = true;
+            }
+            wait_ms = CONFIG_ZMK_VIA_MACRO_DELAY_MS;
+            break;
+        }
+    }
+
+    const bool schedule_next = via_macro_executor.active;
+    event = via_macro_executor.event;
+    event.timestamp = k_uptime_get();
+    k_mutex_unlock(&via_macro_mutex);
+
+    if (invoke) {
+        const int ret = zmk_behavior_invoke_binding(&binding, event, pressed);
+        if (ret < 0) {
+            LOG_ERR("Failed to invoke VIA macro key action: %d", ret);
+        }
+    }
+
+    if (schedule_next) {
+        (void)k_work_schedule(&via_macro_work, K_MSEC(wait_ms));
+    }
+}
+
 int zmk_via_macro_enqueue(uint8_t id, const struct zmk_behavior_binding_event *event) {
     if (!event || id >= CONFIG_ZMK_VIA_MACRO_COUNT) {
         return -EINVAL;
     }
 
-    int ret = 0;
-    uint16_t offset = 0;
     k_mutex_lock(&via_macro_mutex, K_FOREVER);
+    if (via_macro_executor.active) {
+        k_mutex_unlock(&via_macro_mutex);
+        return -EBUSY;
+    }
 
     /* A non-zero final byte marks a VIA transfer that was not completed. */
-    if (via_macro_buffer[ARRAY_SIZE(via_macro_buffer) - 1] != 0) {
-        goto out;
+    if (via_macro_buffer[ARRAY_SIZE(via_macro_buffer) - 1] != 0 ||
+        !via_macro_find_start_locked(id, &via_macro_executor.offset)) {
+        k_mutex_unlock(&via_macro_mutex);
+        return 0;
     }
 
-    for (uint8_t macro = 0; macro < id; macro++) {
-        while (offset < ARRAY_SIZE(via_macro_buffer) && via_macro_buffer[offset] != 0) {
-            offset++;
-        }
-        if (offset == ARRAY_SIZE(via_macro_buffer)) {
-            goto out;
-        }
-        offset++;
-    }
-
-    while (offset < ARRAY_SIZE(via_macro_buffer) && via_macro_buffer[offset] != 0) {
-        struct zmk_behavior_binding binding;
-        if (via_macro_char_to_binding(via_macro_buffer[offset], &binding)) {
-            ret = zmk_behavior_queue_add(event, binding, true, CONFIG_ZMK_VIA_MACRO_DELAY_MS);
-            if (ret < 0) {
-                break;
-            }
-            ret = zmk_behavior_queue_add(event, binding, false, CONFIG_ZMK_VIA_MACRO_DELAY_MS);
-            if (ret < 0) {
-                break;
-            }
-        }
-        offset++;
-    }
-
-out:
+    via_macro_executor.event = *event;
+    via_macro_executor.pending_release = false;
+    via_macro_executor.active = true;
     k_mutex_unlock(&via_macro_mutex);
-    return ret;
+
+    const int ret = k_work_schedule(&via_macro_work, K_NO_WAIT);
+    return ret < 0 ? ret : 0;
 }
 
 static int on_via_macro_binding_pressed(struct zmk_behavior_binding *binding,
                                         struct zmk_behavior_binding_event event) {
     const int ret = zmk_via_macro_enqueue((uint8_t)binding->param1, &event);
     if (ret < 0) {
-        LOG_ERR("Failed to queue VIA macro %u: %d", (unsigned int)binding->param1, ret);
+        LOG_ERR("Failed to start VIA macro %u: %d", (unsigned int)binding->param1, ret);
     }
     return ZMK_BEHAVIOR_OPAQUE;
 }
@@ -356,6 +576,9 @@ static int on_via_macro_binding_released(struct zmk_behavior_binding *binding,
 static const struct behavior_driver_api via_macro_driver_api = {
     .binding_pressed = on_via_macro_binding_pressed,
     .binding_released = on_via_macro_binding_released,
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
+    .parameter_metadata = &via_macro_metadata,
+#endif
 };
 
 BEHAVIOR_DT_INST_DEFINE(0, NULL, NULL, NULL, NULL, POST_KERNEL,

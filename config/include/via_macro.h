@@ -1,9 +1,12 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include <zmk/behavior.h>
+
+bool via_qmk_basic_to_usage(uint8_t keycode, uint32_t *usage);
 
 int zmk_via_macro_get_count(void);
 size_t zmk_via_macro_get_buffer_size(void);

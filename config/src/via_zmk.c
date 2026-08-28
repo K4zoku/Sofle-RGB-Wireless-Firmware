@@ -208,7 +208,7 @@ static bool via_layer_id_to_index(zmk_keymap_layer_id_t id, uint8_t *index) {
     return false;
 }
 
-static bool via_qmk_basic_to_usage(uint8_t keycode, uint32_t *usage) {
+bool via_qmk_basic_to_usage(uint8_t keycode, uint32_t *usage) {
     switch (keycode) {
     case 0xA5: /* KC_SYSTEM_POWER */
         *usage = ZMK_HID_USAGE(HID_USAGE_GD, 0x81);
@@ -760,10 +760,6 @@ static bool via_make_binding(uint16_t keycode, struct zmk_behavior_binding *bind
         return false;
     }
     if (zmk_behavior_validate_binding(binding) >= 0) {
-        return true;
-    }
-    if (strcmp(binding->behavior_dev, VIA_MACRO_BEHAVIOR) == 0 &&
-        binding->param1 < zmk_via_macro_get_count()) {
         return true;
     }
     /* ext_power has no metadata provider in ZMK 0.3, but this fixed custom
