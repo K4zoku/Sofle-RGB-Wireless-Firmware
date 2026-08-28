@@ -19,8 +19,9 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 
 #define VIA_PROTOCOL_VERSION 0x000D
 #define VIA_REPORT_SIZE CONFIG_RAW_HID_REPORT_SIZE
-#define VIA_KEYMAP_ROWS 10
-#define VIA_KEYMAP_COLS 7
+#define VIA_MATRIX_NODE DT_NODELABEL(via_matrix)
+#define VIA_KEYMAP_ROWS DT_PROP(VIA_MATRIX_NODE, rows)
+#define VIA_KEYMAP_COLS DT_PROP(VIA_MATRIX_NODE, columns)
 #define VIA_KEYMAP_SLOTS (VIA_KEYMAP_ROWS * VIA_KEYMAP_COLS)
 
 #define VIA_CMD_GET_PROTOCOL_VERSION 0x01
@@ -67,36 +68,74 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_CUSTOM_KEYCODE_BASE 0x7E00
 #define VIA_CUSTOM_KEYCODE_LAST 0x7E0E
 
+#if DT_NODE_EXISTS(DT_NODELABEL(kp))
 #define VIA_KP_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(kp))
+#else
+#define VIA_KP_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(mt))
 #define VIA_MT_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(mt))
+#else
+#define VIA_MT_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(lt))
 #define VIA_LT_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(lt))
+#else
+#define VIA_LT_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(mo))
 #define VIA_MO_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(mo))
+#else
+#define VIA_MO_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(to))
 #define VIA_TO_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(to))
+#else
+#define VIA_TO_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(tog))
 #define VIA_TOG_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(tog))
+#else
+#define VIA_TOG_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(inc_dec_kp))
 #define VIA_INC_DEC_KP_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(inc_dec_kp))
+#else
+#define VIA_INC_DEC_KP_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(trans))
 #define VIA_TRANS_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(trans))
+#else
+#define VIA_TRANS_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(none))
 #define VIA_NONE_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(none))
+#else
+#define VIA_NONE_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(bt))
 #define VIA_BT_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(bt))
+#else
+#define VIA_BT_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(ext_power))
 #define VIA_EXT_POWER_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(ext_power))
+#else
+#define VIA_EXT_POWER_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(rgb_ug))
 #define VIA_RGB_UG_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(rgb_ug))
+#else
+#define VIA_RGB_UG_BEHAVIOR ""
+#endif
 
 BUILD_ASSERT(VIA_REPORT_SIZE == 32, "Stock VIA requires 32-byte Raw HID reports");
 
-/* The Sofle stock keymap is ordered by physical layout, not by its electrical matrix.
- * This virtual matrix preserves all 60 positions while leaving unused slots invalid. */
-static const uint8_t via_position_map[VIA_KEYMAP_SLOTS] = {
-    0,  1,  2,  3,  4,  5,  UINT8_MAX,
-    12, 13, 14, 15, 16, 17, UINT8_MAX,
-    24, 25, 26, 27, 28, 29, UINT8_MAX,
-    36, 37, 38, 39, 40, 41, 42,
-    50, 51, 52, 53, 54, UINT8_MAX, UINT8_MAX,
-    6,  7,  8,  9,  10, 11, UINT8_MAX,
-    18, 19, 20, 21, 22, 23, UINT8_MAX,
-    30, 31, 32, 33, 34, 35, UINT8_MAX,
-    44, 45, 46, 47, 48, 49, 43,
-    55, 56, 57, 58, 59, UINT8_MAX, UINT8_MAX,
-};
-
+/* The keyboard supplies this virtual-matrix-to-ZMK-position adapter in Devicetree. */
+static const uint8_t via_position_map[] =
+    DT_PROP(DT_NODELABEL(via_matrix), map);
+BUILD_ASSERT(DT_PROP_LEN(DT_NODELABEL(via_matrix), map) == VIA_KEYMAP_SLOTS,
+             "VIA map length must equal rows * columns");
 static uint8_t via_qmk_mods_to_zmk(uint8_t qmk_mods) {
     const bool right = (qmk_mods & BIT(4)) != 0;
     const uint8_t types = qmk_mods & 0x0F;
@@ -252,6 +291,7 @@ static bool via_usage_to_qmk_basic(uint32_t usage, uint8_t *keycode) {
 
 static bool via_custom_keycode_to_binding(uint16_t keycode,
                                           struct zmk_behavior_binding *binding) {
+#if IS_ENABLED(CONFIG_ZMK_VIA_CUSTOM_KEYCODES)
     if (keycode < VIA_CUSTOM_KEYCODE_BASE || keycode > VIA_CUSTOM_KEYCODE_LAST) {
         return false;
     }
@@ -331,6 +371,11 @@ static bool via_custom_keycode_to_binding(uint16_t keycode,
     default:
         return false;
     }
+#else
+    (void)keycode;
+    (void)binding;
+    return false;
+#endif
 }
 
 static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *binding) {
@@ -433,6 +478,7 @@ static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *bi
 
 static bool via_binding_to_custom_keycode(const struct zmk_behavior_binding *binding,
                                           uint16_t *keycode) {
+#if IS_ENABLED(CONFIG_ZMK_VIA_CUSTOM_KEYCODES)
     if (!binding || !binding->behavior_dev) {
         return false;
     }
@@ -483,6 +529,11 @@ static bool via_binding_to_custom_keycode(const struct zmk_behavior_binding *bin
         }
     }
     return false;
+#else
+    (void)binding;
+    (void)keycode;
+    return false;
+#endif
 }
 
 static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint16_t *keycode) {

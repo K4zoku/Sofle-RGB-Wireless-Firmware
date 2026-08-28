@@ -1,0 +1,12 @@
+description: Virtual matrix adapter for generic VIA keymap access
+compatible: "zmk,via-matrix"
+properties:
+  rows:
+    type: int
+    required: true
+  columns:
+    type: int
+    required: true
+  map:
+    type: array
+    required: true
