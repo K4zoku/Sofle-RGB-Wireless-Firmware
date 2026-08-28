@@ -724,6 +724,7 @@ static bool via_get_buffer(uint16_t offset, uint8_t size, uint8_t *data) {
 
 static bool via_set_buffer(uint16_t offset, uint8_t size, const uint8_t *data) {
     struct zmk_behavior_binding bindings[14];
+    zmk_keymap_layer_id_t layer_ids[14];
     uint8_t layers[14];
     uint8_t positions[14];
     const uint8_t count = size / 2;
@@ -737,6 +738,10 @@ static bool via_set_buffer(uint16_t offset, uint8_t size, const uint8_t *data) {
         const uint8_t layer = word / VIA_KEYMAP_SLOTS;
         const uint8_t slot = word % VIA_KEYMAP_SLOTS;
         const uint16_t keycode = ((uint16_t)data[i * 2] << 8) | data[i * 2 + 1];
+
+        if (!via_layer_index_to_id(layer, &layer_ids[i])) {
+            return false;
+        }
 
         if (!via_slot_to_zmk_position(slot / VIA_KEYMAP_COLS, slot % VIA_KEYMAP_COLS,
                                       &positions[i])) {
@@ -762,8 +767,7 @@ static bool via_set_buffer(uint16_t offset, uint8_t size, const uint8_t *data) {
         if (positions[i] == UINT8_MAX) {
             continue;
         }
-        const zmk_keymap_layer_id_t layer_id = zmk_keymap_layer_index_to_id(layers[i]);
-        if (zmk_keymap_set_layer_binding_at_idx(layer_id, positions[i], bindings[i]) < 0) {
+        if (zmk_keymap_set_layer_binding_at_idx(layer_ids[i], positions[i], bindings[i]) < 0) {
             return false;
         }
     }
