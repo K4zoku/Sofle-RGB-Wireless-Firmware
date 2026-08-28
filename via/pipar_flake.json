@@ -1,7 +1,7 @@
 {
   "name": "PiparFlake ZMK VIA",
   "vendorId": "0x1D50",
-  "productId": "0x615E",
+  "productId": "0x6170",
   "matrix": {
     "rows": 3,
     "cols": 3
