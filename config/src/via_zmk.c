@@ -10,6 +10,7 @@
 #include <raw_hid/events.h>
 #include <zmk/behavior.h>
 #include <zmk/keymap.h>
+#include <zmk/matrix.h>
 #include <zmk/sensors.h>
 #include <dt-bindings/zmk/bt.h>
 #include <dt-bindings/zmk/ext_power.h>
@@ -136,6 +137,7 @@ static const uint8_t via_position_map[] =
     DT_PROP(DT_NODELABEL(via_matrix), map);
 BUILD_ASSERT(DT_PROP_LEN(DT_NODELABEL(via_matrix), map) == VIA_KEYMAP_SLOTS,
              "VIA map length must equal rows * columns");
+BUILD_ASSERT(ZMK_KEYMAP_LEN <= UINT8_MAX, "VIA map indices require an 8-bit ZMK keymap");
 static uint8_t via_qmk_mods_to_zmk(uint8_t qmk_mods) {
     const bool right = (qmk_mods & BIT(4)) != 0;
     const uint8_t types = qmk_mods & 0x0F;
@@ -634,7 +636,7 @@ static bool via_slot_to_zmk_position(uint8_t row, uint8_t column, uint8_t *posit
     }
 
     *position = via_position_map[row * VIA_KEYMAP_COLS + column];
-    return *position != UINT8_MAX;
+    return *position != UINT8_MAX && *position < ZMK_KEYMAP_LEN;
 }
 
 static bool via_read_keycode(uint8_t layer, uint8_t row, uint8_t column, uint16_t *keycode) {
