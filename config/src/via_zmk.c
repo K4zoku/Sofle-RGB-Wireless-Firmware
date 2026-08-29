@@ -44,6 +44,7 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_CMD_GET_KEYCODE 0x04
 #define VIA_CMD_SET_KEYCODE 0x05
 #define VIA_CMD_BOOTLOADER_JUMP 0x0B
+#define VIA_CMD_EEPROM_RESET 0x0A
 #define VIA_CMD_DYNAMIC_KEYMAP_RESET 0x06
 #define VIA_CMD_MACRO_GET_COUNT 0x0C
 #define VIA_CMD_MACRO_GET_BUFFER_SIZE 0x0D
@@ -2099,6 +2100,22 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
         changed = zmk_keymap_reset_dynamic_settings() >= 0;
         handled = changed;
         break;
+    case VIA_CMD_EEPROM_RESET: {
+        int ret = zmk_keymap_reset_dynamic_settings();
+        if (ret < 0) {
+            handled = false;
+            break;
+        }
+        ret = zmk_keymap_set_default_layer(0, true);
+        if (ret < 0) {
+            handled = false;
+            break;
+        }
+        ret = zmk_via_macro_reset();
+        handled = ret >= 0;
+        changed = handled;
+        break;
+    }
     case VIA_CMD_MACRO_GET_COUNT:
         report[1] = zmk_via_macro_get_count();
         break;
