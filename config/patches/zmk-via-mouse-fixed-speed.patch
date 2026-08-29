@@ -1,8 +1,8 @@
 diff --git a/app/dts/behaviors/mouse_move.dtsi b/app/dts/behaviors/mouse_move.dtsi
-index 09b93520..0c657a62 100644
+index 09b93520..e1c6c511 100644
 --- a/app/dts/behaviors/mouse_move.dtsi
 +++ b/app/dts/behaviors/mouse_move.dtsi
-@@ -16,6 +16,15 @@
+@@ -16,10 +16,24 @@
              time-to-max-speed-ms = <300>;
              acceleration-exponent = <1>;
          };
@@ -18,6 +18,15 @@ index 09b93520..0c657a62 100644
      };
  
      mmv_input_listener: mmv_input_listener {
+         compatible = "zmk,input-listener";
+         device = <&mmv>;
+     };
++
++    via_mmv_input_listener: via_mmv_input_listener {
++        compatible = "zmk,input-listener";
++        device = <&via_mmv>;
++    };
+ };
 diff --git a/app/src/behaviors/behavior_input_two_axis.c b/app/src/behaviors/behavior_input_two_axis.c
 index ea8e948d..3fc12516 100644
 --- a/app/src/behaviors/behavior_input_two_axis.c
