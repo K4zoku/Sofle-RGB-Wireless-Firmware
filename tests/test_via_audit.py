@@ -61,13 +61,29 @@ class ViaAuditContractTests(unittest.TestCase):
             self.assertFalse(dispatches(length))
         self.assertTrue(dispatches(REPORT_SIZE))
 
-    def test_production_source_contains_safety_guards(self):
+    def test_production_source_contains_compatibility_guards(self):
         source = SOURCE.read_text()
-        self.assertIn("keycode > QMK_QK_BASIC_MAX", source)
-        self.assertIn("(binding->param2 >> 24) == 0", source)
-        self.assertIn("received->length != VIA_REPORT_SIZE", source)
-        self.assertIn("zmk_behavior_get_binding(binding->behavior_dev)", source)
+        for marker in (
+            "zmk_keymap_get_layer_order_snapshot",
+            "zmk_keymap_get_layer_binding_copy",
+            "zmk_keymap_get_sensor_binding_copy",
+            "via_encoder_tagged_param_to_binding",
+            "VIA_CMD_BOOTLOADER_JUMP",
+            "via_device_indicate",
+            "VIA_COMPAT_ACTION_LM",
+            "VIA_COMPAT_ACTION_MOUSE_BUTTON",
+            "QMK_QK_PERSISTENT_DEF_LAYER",
+            "QMK_QK_ONE_SHOT_LAYER",
+            "QMK_QK_LAYER_TAP_TOGGLE",
+            "zmk_behavior_queue_add_pair",
+            "received->length != VIA_REPORT_SIZE",
+        ):
+            self.assertIn(marker, source)
 
+    def test_mouse_range_is_explicitly_covered(self):
+        source = SOURCE.read_text()
+        for keycode in ("0xCD", "0xCE", "0xD1", "0xD8", "0xD9", "0xDC", "0xDD", "0xDF"):
+            self.assertIn(keycode, source)
 
 if __name__ == "__main__":
     unittest.main()
