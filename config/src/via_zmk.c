@@ -455,8 +455,8 @@ static int via_mouse_adjust(uint8_t action, uint8_t value, int16_t speed) {
     if (ret < 0) {
         return ret;
     }
-    dx *= speed;
-    dy *= speed;
+    dx = dx < 0 ? -speed : (dx > 0 ? speed : 0);
+    dy = dy < 0 ? -speed : (dy > 0 ? speed : 0);
     const char *behavior_dev = action == VIA_COMPAT_ACTION_MOUSE_SCROLL
                                    ? VIA_MSC_BEHAVIOR
                                    : VIA_MMV_BEHAVIOR;
