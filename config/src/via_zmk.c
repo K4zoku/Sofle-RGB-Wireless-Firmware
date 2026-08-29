@@ -389,6 +389,18 @@ static int via_compat_keycode_listener(const zmk_event_t *event) {
     return ZMK_EV_EVENT_BUBBLE;
 }
 
+static void via_mouse_move_vector(uint8_t value, int16_t *dx, int16_t *dy) {
+    *dx = 0;
+    *dy = 0;
+    switch (value) {
+    case 0: *dy = MOVE_Y_DECODE(MOVE_UP); break;
+    case 1: *dy = MOVE_Y_DECODE(MOVE_DOWN); break;
+    case 2: *dx = MOVE_X_DECODE(MOVE_LEFT); break;
+    case 3: *dx = MOVE_X_DECODE(MOVE_RIGHT); break;
+    default: break;
+    }
+}
+
 static int via_compat_binding_pressed(struct zmk_behavior_binding *binding,
                                       struct zmk_behavior_binding_event event) {
     const uint8_t action = binding->param1 >> VIA_COMPAT_ACTION_SHIFT;
@@ -414,12 +426,11 @@ static int via_compat_binding_pressed(struct zmk_behavior_binding *binding,
         if (event.position >= ZMK_KEYMAP_LEN) return -EINVAL;
         via_mouse_move_acceleration[event.position] = via_mouse_acceleration;
         const int16_t speed = 1 << via_mouse_move_acceleration[event.position];
-        int16_t dx = 0;
-        int16_t dy = 0;
-        if (value == 0) dx = -ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
-        if (value == 1) dx = ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
-        if (value == 2) dy = -ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
-        if (value == 3) dy = ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
+        int16_t dx;
+        int16_t dy;
+        via_mouse_move_vector(value, &dx, &dy);
+        dx *= speed;
+        dy *= speed;
         extern int behavior_input_two_axis_adjust_speed(const struct device *, int16_t, int16_t);
         return behavior_input_two_axis_adjust_speed(zmk_behavior_get_binding(VIA_MMV_BEHAVIOR),
                                                     dx, dy);
@@ -454,12 +465,11 @@ static int via_compat_binding_released(struct zmk_behavior_binding *binding,
     case VIA_COMPAT_ACTION_MOUSE_MOVE: {
         if (event.position >= ZMK_KEYMAP_LEN) return -EINVAL;
         const int16_t speed = 1 << via_mouse_move_acceleration[event.position];
-        int16_t dx = 0;
-        int16_t dy = 0;
-        if (value == 0) dx = ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
-        if (value == 1) dx = -ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
-        if (value == 2) dy = ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
-        if (value == 3) dy = -ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
+        int16_t dx;
+        int16_t dy;
+        via_mouse_move_vector(value, &dx, &dy);
+        dx *= -speed;
+        dy *= -speed;
         extern int behavior_input_two_axis_adjust_speed(const struct device *, int16_t, int16_t);
         return behavior_input_two_axis_adjust_speed(zmk_behavior_get_binding(VIA_MMV_BEHAVIOR),
                                                     dx, dy);
@@ -1145,10 +1155,10 @@ static bool via_mouse_binding_to_qmk(const struct zmk_behavior_binding *binding,
     }
     if (strcmp(binding->behavior_dev, VIA_MMV_BEHAVIOR) == 0) {
         switch (binding->param1) {
-        case MOVE_LEFT: *keycode = 0xCD; return true;
-        case MOVE_RIGHT: *keycode = 0xCE; return true;
-        case MOVE_UP: *keycode = 0xCF; return true;
-        case MOVE_DOWN: *keycode = 0xD0; return true;
+        case MOVE_UP: *keycode = 0xCD; return true;
+        case MOVE_DOWN: *keycode = 0xCE; return true;
+        case MOVE_LEFT: *keycode = 0xCF; return true;
+        case MOVE_RIGHT: *keycode = 0xD0; return true;
         default: return false;
         }
     }
