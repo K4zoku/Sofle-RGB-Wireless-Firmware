@@ -10,6 +10,25 @@ KC_F7 = 0x40
 KC_ASSISTANT = 0xC0
 QK_BASIC_MAX = 0x00FF
 ENCODER_TAG = 0xA0000000
+
+ENCODER_SUPPORTED_MOUSE = set(range(0xD1, 0xDD))
+ENCODER_UNSUPPORTED_RANGES = (
+    range(0x2000, 0x4000),
+    range(0x4000, 0x5000),
+    range(0x5000, 0x5200),
+    range(0x5220, 0x5240),
+    range(0x52C0, 0x52E0),
+)
+
+
+def encoder_keycode_supported(keycode: int) -> bool:
+    if keycode in (0x0000, 0x0001):
+        return True
+    if 0x00CD <= keycode <= 0x00DF:
+        return keycode in ENCODER_SUPPORTED_MOUSE
+    return not any(keycode in unsupported for unsupported in ENCODER_UNSUPPORTED_RANGES)
+
+
 SOURCE = Path(__file__).parents[1] / "config/src/via_zmk.c"
 
 
@@ -71,7 +90,6 @@ class ViaAuditContractTests(unittest.TestCase):
             "VIA_CMD_BOOTLOADER_JUMP",
             "via_device_indicate",
             "VIA_COMPAT_ACTION_LM",
-            "VIA_COMPAT_ACTION_MOUSE_BUTTON",
             "QMK_QK_PERSISTENT_DEF_LAYER",
             "QMK_QK_ONE_SHOT_LAYER",
             "QMK_QK_LAYER_TAP_TOGGLE",
@@ -79,6 +97,30 @@ class ViaAuditContractTests(unittest.TestCase):
             "received->length != VIA_REPORT_SIZE",
         ):
             self.assertIn(marker, source)
+
+    def test_encoder_policy_accepts_discrete_actions_only(self):
+        for keycode in (0x0000, 0x0001, KC_A, 0x0104, 0x5200, 0x5261, 0x5242,
+                        0x5281, 0x52A1, 0x7700, 0x7E06):
+            self.assertTrue(encoder_keycode_supported(keycode), hex(keycode))
+
+        for keycode in (0x2004, 0x4004, 0x5001, 0x5221, 0x52C1):
+            self.assertFalse(encoder_keycode_supported(keycode), hex(keycode))
+
+        for keycode in range(0xCD, 0xE0):
+            expected = 0xD1 <= keycode <= 0xDC
+            self.assertEqual(encoder_keycode_supported(keycode), expected, hex(keycode))
+
+    def test_encoder_runtime_has_fallthrough_and_queue_safety_guards(self):
+        source = SOURCE.read_text()
+        self.assertIn("static bool via_encoder_keycode_supported(uint16_t keycode)", source)
+        self.assertIn("via_encoder_keycode_supported(raw_keycodes[i])", source)
+        self.assertIn("if (raw_keycode == QMK_KC_TRANSPARENT)", source)
+        self.assertIn("if (raw_keycode == QMK_KC_NO)", source)
+        self.assertIn("via_encoder_emit_wheel(raw_keycode - 0xD9)", source)
+        self.assertIn("INPUT_REL_WHEEL", source)
+        queue_failure = source[source.index("VIA encoder queue exhausted") :]
+        self.assertIn("return ZMK_BEHAVIOR_OPAQUE;", queue_failure)
+        self.assertNotIn("return ZMK_BEHAVIOR_TRANSPARENT;", queue_failure[:200])
 
     def test_mouse_range_is_explicitly_covered(self):
         source = SOURCE.read_text()

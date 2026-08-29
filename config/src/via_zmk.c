@@ -7,6 +7,7 @@
 
 #include <dt-bindings/zmk/hid_usage_pages.h>
 #include <dt-bindings/zmk/hid_usage.h>
+#include <zephyr/input/input.h>
 #include <drivers/behavior.h>
 #include <dt-bindings/zmk/modifiers.h>
 #include <raw_hid/events.h>
@@ -1434,6 +1435,7 @@ static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint1
 }
 
 static bool via_make_binding(uint16_t keycode, struct zmk_behavior_binding *binding);
+static bool via_encoder_keycode_supported(uint16_t keycode);
 static bool via_encoder_layer_param_to_qmk(uint32_t param, uint16_t *keycode) {
     const uint8_t action =
         (param >> VIA_ENCODER_LAYER_ACTION_SHIFT) & VIA_ENCODER_LAYER_ACTION_MASK;
@@ -1709,7 +1711,8 @@ static bool via_write_encoder(uint8_t layer, uint8_t encoder, bool clockwise,
     raw_keycodes[clockwise ? 0 : 1] = keycode;
     for (size_t i = 0; i < ARRAY_SIZE(raw_keycodes); i++) {
         struct zmk_behavior_binding translated;
-        if (!via_make_binding(raw_keycodes[i], &translated) ||
+        if ((i == (clockwise ? 0 : 1) && !via_encoder_keycode_supported(raw_keycodes[i])) ||
+            !via_make_binding(raw_keycodes[i], &translated) ||
             !via_normalize_encoder_keycode(raw_keycodes[i], &stored_keycodes[i])) {
             return false;
         }
@@ -1798,8 +1801,55 @@ static bool via_make_binding(uint16_t keycode, struct zmk_behavior_binding *bind
     }
     /* ext_power has no metadata provider in ZMK 0.3, but this fixed custom
      * binding is already part of the stock Sofle keymap. */
-    return strcmp(binding->behavior_dev, VIA_EXT_POWER_BEHAVIOR) == 0 &&
-           binding->param1 == EXT_POWER_TOGGLE_CMD && binding->param2 == 0;
+    if (strcmp(binding->behavior_dev, VIA_EXT_POWER_BEHAVIOR) == 0 &&
+        binding->param1 == EXT_POWER_TOGGLE_CMD && binding->param2 == 0) {
+        return true;
+    }
+    /* QMK mouse bindings are range-checked by via_qmk_mouse_to_binding, but
+     * via_compat has no metadata provider in ZMK 0.3. */
+    return keycode >= QMK_QK_MOUSE_MIN && keycode <= QMK_QK_MOUSE_MAX &&
+           strcmp(binding->behavior_dev, VIA_COMPAT_BEHAVIOR) == 0;
+}
+
+static bool via_encoder_keycode_supported(uint16_t keycode) {
+    if (keycode == QMK_KC_NO || keycode == QMK_KC_TRANSPARENT) {
+        return true;
+    }
+
+    if (keycode >= QMK_QK_MOUSE_MIN && keycode <= QMK_QK_MOUSE_MAX) {
+        /* Buttons click once and wheel directions emit one discrete step. */
+        return keycode >= 0xD1 && keycode <= 0xDC;
+    }
+
+    if ((keycode >= QMK_QK_MOD_TAP && keycode <= QMK_QK_MOD_TAP_MAX) ||
+        (keycode >= QMK_QK_LAYER_TAP && keycode <= QMK_QK_LAYER_TAP_MAX) ||
+        (keycode >= QMK_QK_MOMENTARY && keycode <= QMK_QK_MOMENTARY_MAX) ||
+        (keycode >= QMK_QK_LAYER_MOD && keycode <= QMK_QK_LAYER_MOD_MAX) ||
+        (keycode >= QMK_QK_LAYER_TAP_TOGGLE && keycode <= QMK_QK_LAYER_TAP_TOGGLE_MAX)) {
+        return false;
+    }
+
+    return true;
+}
+
+static int via_encoder_emit_wheel(uint8_t value) {
+    const struct device *dev = zmk_behavior_get_binding(VIA_MSC_BEHAVIOR);
+    if (!dev) {
+        return -ENODEV;
+    }
+
+    switch (value) {
+    case 0:
+        return input_report_rel(dev, INPUT_REL_WHEEL, 1, true, K_NO_WAIT);
+    case 1:
+        return input_report_rel(dev, INPUT_REL_WHEEL, -1, true, K_NO_WAIT);
+    case 2:
+        return input_report_rel(dev, INPUT_REL_HWHEEL, -1, true, K_NO_WAIT);
+    case 3:
+        return input_report_rel(dev, INPUT_REL_HWHEEL, 1, true, K_NO_WAIT);
+    default:
+        return -EINVAL;
+    }
 }
 
 static struct sensor_value via_encoder_remainder[MAX(1, ZMK_KEYMAP_SENSORS_LEN)]
@@ -1874,8 +1924,33 @@ static int via_encoder_process(struct zmk_behavior_binding *binding,
     }
 
     const uint32_t raw_param = triggers > 0 ? binding->param1 : binding->param2;
+    via_encoder_triggers[sensor_index][event.layer] = 0;
     if (triggers < 0) {
         triggers = -triggers;
+    }
+
+    uint16_t raw_keycode;
+    if (!via_encoder_param_to_qmk(raw_param, &raw_keycode)) {
+        LOG_ERR("Rejecting invalid VIA encoder parameter 0x%08X", raw_param);
+        return ZMK_BEHAVIOR_OPAQUE;
+    }
+    if (raw_keycode == QMK_KC_TRANSPARENT) {
+        return ZMK_BEHAVIOR_TRANSPARENT;
+    }
+    if (raw_keycode == QMK_KC_NO) {
+        return ZMK_BEHAVIOR_OPAQUE;
+    }
+    if (!via_encoder_keycode_supported(raw_keycode)) {
+        LOG_WRN("Ignoring unsupported VIA encoder keycode 0x%04X", raw_keycode);
+        return ZMK_BEHAVIOR_OPAQUE;
+    }
+    if (raw_keycode >= 0xD9 && raw_keycode <= 0xDC) {
+        for (int i = 0; i < triggers; i++) {
+            if (via_encoder_emit_wheel(raw_keycode - 0xD9) < 0) {
+                LOG_ERR("Failed to emit VIA encoder wheel step");
+            }
+        }
+        return ZMK_BEHAVIOR_OPAQUE;
     }
 
     struct zmk_behavior_binding translated;
@@ -1884,9 +1959,8 @@ static int via_encoder_process(struct zmk_behavior_binding *binding,
                      : via_encoder_param_to_binding(raw_param, &translated);
     if (!valid || !translated.behavior_dev ||
         !zmk_behavior_get_binding(translated.behavior_dev)) {
-        via_encoder_triggers[sensor_index][event.layer] = 0;
         LOG_ERR("Rejecting invalid VIA encoder parameter 0x%08X", raw_param);
-        return ZMK_BEHAVIOR_TRANSPARENT;
+        return ZMK_BEHAVIOR_OPAQUE;
     }
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT)
@@ -1897,8 +1971,7 @@ static int via_encoder_process(struct zmk_behavior_binding *binding,
         int ret = zmk_behavior_queue_add_pair(&event, translated, 5);
         if (ret < 0) {
             LOG_ERR("VIA encoder queue exhausted (%d)", ret);
-            via_encoder_triggers[sensor_index][event.layer] = 0;
-            return ZMK_BEHAVIOR_TRANSPARENT;
+            return ZMK_BEHAVIOR_OPAQUE;
         }
     }
 
