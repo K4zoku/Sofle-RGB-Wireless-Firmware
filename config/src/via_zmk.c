@@ -133,7 +133,6 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_COMPAT_ACTION_OSM 5
 #define VIA_COMPAT_ACTION_MOUSE_ACCEL 6
 #define VIA_COMPAT_ACTION_MOUSE_MOVE 7
-#define VIA_COMPAT_ACTION_MOUSE_BUTTON 8
 #define VIA_COMPAT_ACTION_SHIFT 24
 #if DT_NODE_EXISTS(DT_NODELABEL(kp))
 #define VIA_KP_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(kp))
@@ -435,8 +434,6 @@ static int via_compat_binding_pressed(struct zmk_behavior_binding *binding,
         return behavior_input_two_axis_adjust_speed(zmk_behavior_get_binding(VIA_MMV_BEHAVIOR),
                                                     dx, dy);
     }
-    case VIA_COMPAT_ACTION_MOUSE_BUTTON:
-        return zmk_hid_mouse_button_press(value);
     case VIA_COMPAT_ACTION_TT:
         if (event.position >= ZMK_KEYMAP_LEN) {
             return -EINVAL;
@@ -474,8 +471,6 @@ static int via_compat_binding_released(struct zmk_behavior_binding *binding,
         return behavior_input_two_axis_adjust_speed(zmk_behavior_get_binding(VIA_MMV_BEHAVIOR),
                                                     dx, dy);
     }
-    case VIA_COMPAT_ACTION_MOUSE_BUTTON:
-        return zmk_hid_mouse_button_release(value);
     case VIA_COMPAT_ACTION_TT:
         if (event.position >= ZMK_KEYMAP_LEN) {
             return -EINVAL;
@@ -867,9 +862,14 @@ static bool via_qmk_mouse_to_binding(uint8_t keycode, struct zmk_behavior_bindin
     case 0xD0: value = 3; break;
     case 0xD1: case 0xD2: case 0xD3: case 0xD4:
     case 0xD5: case 0xD6: case 0xD7: case 0xD8:
-        action = VIA_COMPAT_ACTION_MOUSE_BUTTON;
-        value = keycode - 0xD1;
-        break;
+        if (!VIA_MKP_BEHAVIOR[0]) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_MKP_BEHAVIOR,
+            .param1 = BIT(keycode - 0xD1),
+        };
+        return true;
     case 0xD9:
         *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_MSC_BEHAVIOR,
                                                   .param1 = SCRL_UP};
@@ -893,8 +893,7 @@ static bool via_qmk_mouse_to_binding(uint8_t keycode, struct zmk_behavior_bindin
     default:
         return false;
     }
-    if (!VIA_COMPAT_BEHAVIOR[0] ||
-        (action == VIA_COMPAT_ACTION_MOUSE_BUTTON && value >= 8)) {
+    if (!VIA_COMPAT_BEHAVIOR[0]) {
         return false;
     }
     if (!action) {
@@ -1131,12 +1130,6 @@ static bool via_compat_binding_to_qmk(const struct zmk_behavior_binding *binding
         }
         *keycode = QMK_QK_MOUSE_MIN + (binding->param1 & 0xFF);
         return true;
-    case VIA_COMPAT_ACTION_MOUSE_BUTTON:
-        if ((binding->param1 & 0xFF) > 7) {
-            return false;
-        }
-        *keycode = 0xD1 + (binding->param1 & 0xFF);
-        return true;
     case VIA_COMPAT_ACTION_MOUSE_ACCEL:
         if ((binding->param1 & 0xFF) > 2) {
             return false;
@@ -1173,7 +1166,7 @@ static bool via_mouse_binding_to_qmk(const struct zmk_behavior_binding *binding,
     }
     if (strcmp(binding->behavior_dev, VIA_MKP_BEHAVIOR) == 0 &&
         binding->param1 && (binding->param1 & (binding->param1 - 1)) == 0 &&
-        binding->param1 <= BIT(4)) {
+        binding->param1 <= BIT(7) && binding->param2 == 0) {
         *keycode = 0xD1 + __builtin_ctz(binding->param1);
         return true;
     }
