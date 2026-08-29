@@ -3,6 +3,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/sys/reboot.h>
 
 #include <dt-bindings/zmk/hid_usage_pages.h>
 #include <dt-bindings/zmk/hid_usage.h>
@@ -22,6 +23,10 @@
 #include <dt-bindings/zmk/bt.h>
 #include <dt-bindings/zmk/ext_power.h>
 #include <dt-bindings/zmk/rgb.h>
+#include <zmk/hid.h>
+#include <dt-bindings/zmk/reset.h>
+#include <dt-bindings/zmk/pointing.h>
+#include <zmk/events/keycode_state_changed.h>
 
 LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 
@@ -37,6 +42,7 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_CMD_SET_KEYBOARD_VALUE 0x03
 #define VIA_CMD_GET_KEYCODE 0x04
 #define VIA_CMD_SET_KEYCODE 0x05
+#define VIA_CMD_BOOTLOADER_JUMP 0x0B
 #define VIA_CMD_RESET 0x06
 #define VIA_CMD_MACRO_GET_COUNT 0x0C
 #define VIA_CMD_MACRO_GET_BUFFER_SIZE 0x0D
@@ -78,11 +84,20 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define QMK_QK_TO_MAX 0x521F
 #define QMK_QK_MOMENTARY 0x5220
 #define QMK_QK_MOMENTARY_MAX 0x523F
+#define QMK_QK_DEF_LAYER 0x5240
+#define QMK_QK_DEF_LAYER_MAX 0x525F
+#define QMK_QK_ONE_SHOT_LAYER 0x5280
+#define QMK_QK_ONE_SHOT_LAYER_MAX 0x529F
+#define QMK_QK_ONE_SHOT_MOD 0x52A0
+#define QMK_QK_ONE_SHOT_MOD_MAX 0x52BF
+#define QMK_QK_LAYER_TAP_TOGGLE 0x52C0
+#define QMK_QK_LAYER_TAP_TOGGLE_MAX 0x52DF
+#define QMK_QK_PERSISTENT_DEF_LAYER 0x52E0
+#define QMK_QK_PERSISTENT_DEF_LAYER_MAX 0x52FF
 #define QMK_QK_TOGGLE_LAYER 0x5260
 #define QMK_QK_TOGGLE_LAYER_MAX 0x527F
 #define QMK_QK_LAYER_MOD 0x5000
 #define QMK_QK_LAYER_MOD_MAX 0x51FF
-
 #define QMK_QK_BASIC_MAX 0x00FF
 
 #define QMK_QK_MACRO 0x7700
@@ -93,7 +108,7 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_ENCODER_LAYER_TAG_MASK 0xF0000000u
 #define VIA_ENCODER_LAYER_TAG 0xA0000000u
 #define VIA_ENCODER_LAYER_ACTION_SHIFT 24
-#define VIA_ENCODER_LAYER_ACTION_MASK 0x07u
+#define VIA_ENCODER_LAYER_ACTION_MASK 0x0Fu
 #define VIA_ENCODER_LAYER_ID_SHIFT 16
 #define VIA_ENCODER_LAYER_ID_MASK 0xFFu
 #define VIA_ENCODER_LAYER_PAYLOAD_MASK 0xFFFFu
@@ -102,6 +117,23 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_ENCODER_ACTION_TO 2
 #define VIA_ENCODER_ACTION_MO 3
 #define VIA_ENCODER_ACTION_TG 4
+#define VIA_ENCODER_ACTION_LM 5
+#define VIA_ENCODER_ACTION_DF 6
+#define VIA_ENCODER_ACTION_PDF 7
+#define VIA_ENCODER_ACTION_OSL 8
+#define VIA_ENCODER_ACTION_TT 9
+#define QMK_QK_MOUSE_MIN 0x00CD
+#define QMK_QK_MOUSE_MAX 0x00DF
+
+#define VIA_COMPAT_ACTION_LM 1
+#define VIA_COMPAT_ACTION_DF 2
+#define VIA_COMPAT_ACTION_PDF 3
+#define VIA_COMPAT_ACTION_TT 4
+#define VIA_COMPAT_ACTION_OSM 5
+#define VIA_COMPAT_ACTION_MOUSE_ACCEL 6
+#define VIA_COMPAT_ACTION_MOUSE_MOVE 7
+#define VIA_COMPAT_ACTION_MOUSE_BUTTON 8
+#define VIA_COMPAT_ACTION_SHIFT 24
 #if DT_NODE_EXISTS(DT_NODELABEL(kp))
 #define VIA_KP_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(kp))
 #else
@@ -171,6 +203,31 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_ENCODER_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(via_encoder))
 #else
 #define VIA_ENCODER_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(via_compat))
+#define VIA_COMPAT_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(via_compat))
+#else
+#define VIA_COMPAT_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(sl))
+#define VIA_SL_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(sl))
+#else
+#define VIA_SL_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(mmv))
+#define VIA_MMV_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(mmv))
+#else
+#define VIA_MMV_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(msc))
+#define VIA_MSC_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(msc))
+#else
+#define VIA_MSC_BEHAVIOR ""
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(mkp))
+#define VIA_MKP_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(mkp))
+#else
+#define VIA_MKP_BEHAVIOR ""
 #endif
 
 BUILD_ASSERT(VIA_REPORT_SIZE == 32, "Stock VIA requires 32-byte Raw HID reports");
@@ -303,15 +360,170 @@ static bool via_zmk_mods_to_qmk(uint8_t zmk_mods, uint8_t *qmk_mods) {
     *qmk_mods = left ? left : (right ? (right | BIT(4)) : 0);
     return true;
 }
+
+static zmk_mod_flags_t via_oneshot_mods;
+static uint8_t via_mouse_acceleration;
+static uint8_t via_mouse_move_acceleration[ZMK_KEYMAP_LEN];
+static uint32_t via_tt_press_time[ZMK_KEYMAP_LEN];
+static uint32_t via_tt_last_tap_time[ZMK_KEYMAP_LEN];
+static uint8_t via_tt_tap_count[ZMK_KEYMAP_LEN];
+static bool via_tt_sequence_active[ZMK_KEYMAP_LEN];
+static bool via_tt_was_active[ZMK_KEYMAP_LEN];
+static void via_oneshot_release_work_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(via_oneshot_release_work, via_oneshot_release_work_handler);
+
+static void via_oneshot_release_work_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+    if (via_oneshot_mods) {
+        zmk_hid_unregister_mods(via_oneshot_mods);
+        via_oneshot_mods = 0;
+    }
+}
+static int via_compat_keycode_listener(const zmk_event_t *event) {
+    const struct zmk_keycode_state_changed *ev = as_zmk_keycode_state_changed(event);
+    if (ev && ev->state && via_oneshot_mods &&
+        !(ev->usage_page == HID_USAGE_KEY && ev->keycode >= 0xE0 && ev->keycode <= 0xE7)) {
+        k_work_reschedule(&via_oneshot_release_work, K_NO_WAIT);
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+static int via_compat_binding_pressed(struct zmk_behavior_binding *binding,
+                                      struct zmk_behavior_binding_event event) {
+    const uint8_t action = binding->param1 >> VIA_COMPAT_ACTION_SHIFT;
+    const uint8_t value = binding->param1 & 0xFF;
+    switch (action) {
+    case VIA_COMPAT_ACTION_LM:
+        if (zmk_keymap_layer_activate(value) < 0) {
+            return -EINVAL;
+        }
+        return zmk_hid_register_mods(via_qmk_mods_to_zmk(binding->param2 >> 24));
+    case VIA_COMPAT_ACTION_DF:
+        return zmk_keymap_set_default_layer(value, false);
+    case VIA_COMPAT_ACTION_PDF:
+        return zmk_keymap_set_default_layer(value, true);
+    case VIA_COMPAT_ACTION_OSM:
+        via_oneshot_mods = via_qmk_mods_to_zmk(value);
+        k_work_reschedule(&via_oneshot_release_work, K_MSEC(5000));
+        return zmk_hid_register_mods(via_oneshot_mods);
+    case VIA_COMPAT_ACTION_MOUSE_ACCEL:
+        via_mouse_acceleration = MIN(value, 2);
+        return 0;
+    case VIA_COMPAT_ACTION_MOUSE_MOVE: {
+        if (event.position >= ZMK_KEYMAP_LEN) return -EINVAL;
+        via_mouse_move_acceleration[event.position] = via_mouse_acceleration;
+        const int16_t speed = 1 << via_mouse_move_acceleration[event.position];
+        int16_t dx = 0;
+        int16_t dy = 0;
+        if (value == 0) dx = -ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
+        if (value == 1) dx = ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
+        if (value == 2) dy = -ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
+        if (value == 3) dy = ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
+        extern int behavior_input_two_axis_adjust_speed(const struct device *, int16_t, int16_t);
+        return behavior_input_two_axis_adjust_speed(zmk_behavior_get_binding(VIA_MMV_BEHAVIOR),
+                                                    dx, dy);
+    }
+    case VIA_COMPAT_ACTION_MOUSE_BUTTON:
+        return zmk_hid_mouse_button_press(value);
+    case VIA_COMPAT_ACTION_TT:
+        if (event.position >= ZMK_KEYMAP_LEN) {
+            return -EINVAL;
+        }
+        if (!via_tt_sequence_active[event.position] ||
+            event.timestamp - via_tt_last_tap_time[event.position] > 500) {
+            via_tt_tap_count[event.position] = 0;
+            via_tt_was_active[event.position] = zmk_keymap_layer_active(value);
+        }
+        via_tt_sequence_active[event.position] = true;
+        via_tt_press_time[event.position] = event.timestamp;
+        return zmk_keymap_layer_activate(value);
+    default:
+        return -ENOTSUP;
+    }
+}
+
+static int via_compat_binding_released(struct zmk_behavior_binding *binding,
+                                       struct zmk_behavior_binding_event event) {
+    const uint8_t action = binding->param1 >> VIA_COMPAT_ACTION_SHIFT;
+    const uint8_t value = binding->param1 & 0xFF;
+    switch (action) {
+    case VIA_COMPAT_ACTION_LM:
+        zmk_hid_unregister_mods(via_qmk_mods_to_zmk(binding->param2 >> 24));
+        return zmk_keymap_layer_deactivate(value);
+    case VIA_COMPAT_ACTION_MOUSE_MOVE: {
+        if (event.position >= ZMK_KEYMAP_LEN) return -EINVAL;
+        const int16_t speed = 1 << via_mouse_move_acceleration[event.position];
+        int16_t dx = 0;
+        int16_t dy = 0;
+        if (value == 0) dx = ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
+        if (value == 1) dx = -ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
+        if (value == 2) dy = ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
+        if (value == 3) dy = -ZMK_POINTING_DEFAULT_MOVE_VAL * speed;
+        extern int behavior_input_two_axis_adjust_speed(const struct device *, int16_t, int16_t);
+        return behavior_input_two_axis_adjust_speed(zmk_behavior_get_binding(VIA_MMV_BEHAVIOR),
+                                                    dx, dy);
+    }
+    case VIA_COMPAT_ACTION_MOUSE_BUTTON:
+        return zmk_hid_mouse_button_release(value);
+    case VIA_COMPAT_ACTION_TT:
+        if (event.position >= ZMK_KEYMAP_LEN) {
+            return -EINVAL;
+        }
+        if (event.timestamp - via_tt_press_time[event.position] > 200) {
+            via_tt_sequence_active[event.position] = false;
+            via_tt_tap_count[event.position] = 0;
+            return zmk_keymap_layer_deactivate(value);
+        }
+        via_tt_last_tap_time[event.position] = event.timestamp;
+        if (++via_tt_tap_count[event.position] < 5) {
+            return zmk_keymap_layer_deactivate(value);
+        }
+        via_tt_sequence_active[event.position] = false;
+        via_tt_tap_count[event.position] = 0;
+        const bool target_active = !via_tt_was_active[event.position];
+        if (zmk_keymap_layer_active(value) != target_active) {
+            return zmk_keymap_layer_toggle(value);
+        }
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+static const struct behavior_driver_api via_compat_driver_api = {
+    .binding_pressed = via_compat_binding_pressed,
+    .binding_released = via_compat_binding_released,
+};
+
+#if DT_NODE_EXISTS(DT_NODELABEL(via_compat))
+BEHAVIOR_DT_DEFINE(DT_NODELABEL(via_compat), NULL, NULL, NULL, NULL, POST_KERNEL,
+                   CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &via_compat_driver_api);
+ZMK_LISTENER(via_compat, via_compat_keycode_listener);
+ZMK_SUBSCRIPTION(via_compat, zmk_keycode_state_changed);
+#endif
+static struct zmk_keymap_layer_order_snapshot via_layer_order_snapshot;
+static bool via_layer_order_snapshot_valid;
+
 static bool via_layer_index_to_id(uint8_t index, zmk_keymap_layer_id_t *id) {
     if (index >= ZMK_KEYMAP_LAYERS_LEN) {
         return false;
     }
-    *id = zmk_keymap_layer_index_to_id(index);
+    if (via_layer_order_snapshot_valid) {
+        *id = via_layer_order_snapshot.index_to_id[index];
+    } else {
+        *id = zmk_keymap_layer_index_to_id(index);
+    }
     return *id != ZMK_KEYMAP_LAYER_ID_INVAL;
 }
 
 static bool via_layer_id_to_index(zmk_keymap_layer_id_t id, uint8_t *index) {
+    if (id >= ZMK_KEYMAP_LAYERS_LEN) {
+        return false;
+    }
+    if (via_layer_order_snapshot_valid) {
+        *index = via_layer_order_snapshot.id_to_index[id];
+        return *index != ZMK_KEYMAP_LAYER_ID_INVAL;
+    }
     for (uint8_t candidate = 0; candidate < ZMK_KEYMAP_LAYERS_LEN; candidate++) {
         if (zmk_keymap_layer_index_to_id(candidate) == id) {
             *index = candidate;
@@ -634,6 +846,56 @@ static bool via_custom_keycode_to_binding(uint16_t keycode,
 #endif
 }
 
+static bool via_qmk_mouse_to_binding(uint8_t keycode, struct zmk_behavior_binding *binding) {
+    uint8_t action = 0;
+    uint8_t value = 0;
+    switch (keycode) {
+    case 0xCD: value = 0; break;
+    case 0xCE: value = 1; break;
+    case 0xCF: value = 2; break;
+    case 0xD0: value = 3; break;
+    case 0xD1: case 0xD2: case 0xD3: case 0xD4:
+    case 0xD5: case 0xD6: case 0xD7: case 0xD8:
+        action = VIA_COMPAT_ACTION_MOUSE_BUTTON;
+        value = keycode - 0xD1;
+        break;
+    case 0xD9:
+        *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_MSC_BEHAVIOR,
+                                                  .param1 = SCRL_UP};
+        return true;
+    case 0xDA:
+        *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_MSC_BEHAVIOR,
+                                                  .param1 = SCRL_DOWN};
+        return true;
+    case 0xDB:
+        *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_MSC_BEHAVIOR,
+                                                  .param1 = SCRL_LEFT};
+        return true;
+    case 0xDC:
+        *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_MSC_BEHAVIOR,
+                                                  .param1 = SCRL_RIGHT};
+        return true;
+    case 0xDD: case 0xDE: case 0xDF:
+        action = VIA_COMPAT_ACTION_MOUSE_ACCEL;
+        value = keycode - 0xDD;
+        break;
+    default:
+        return false;
+    }
+    if (!VIA_COMPAT_BEHAVIOR[0] ||
+        (action == VIA_COMPAT_ACTION_MOUSE_BUTTON && value >= 8)) {
+        return false;
+    }
+    if (!action) {
+        action = VIA_COMPAT_ACTION_MOUSE_MOVE;
+    }
+    *binding = (struct zmk_behavior_binding){
+        .behavior_dev = VIA_COMPAT_BEHAVIOR,
+        .param1 = (action << VIA_COMPAT_ACTION_SHIFT) | value,
+    };
+    return true;
+}
+
 static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *binding) {
     uint32_t usage;
 
@@ -659,6 +921,9 @@ static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *bi
     if (via_custom_keycode_to_binding(keycode, binding)) {
         return true;
     }
+    if (keycode <= QMK_QK_BASIC_MAX && via_qmk_mouse_to_binding((uint8_t)keycode, binding)) {
+        return true;
+    }
 
     if (keycode >= QMK_QK_MODS && keycode <= QMK_QK_MODS_MAX) {
         const uint8_t qmk_mods = (keycode >> 8) & 0x1F;
@@ -668,6 +933,74 @@ static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *bi
         *binding = (struct zmk_behavior_binding){
             .behavior_dev = VIA_KP_BEHAVIOR,
             .param1 = ((uint32_t)via_qmk_mods_to_zmk(qmk_mods) << 24) | usage,
+        };
+        return true;
+    }
+
+    if (keycode >= QMK_QK_LAYER_MOD && keycode <= QMK_QK_LAYER_MOD_MAX) {
+        zmk_keymap_layer_id_t layer_id;
+        if (!via_layer_index_to_id((keycode >> 5) & 0x0F, &layer_id) || !VIA_COMPAT_BEHAVIOR[0]) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_COMPAT_BEHAVIOR,
+            .param1 = (VIA_COMPAT_ACTION_LM << VIA_COMPAT_ACTION_SHIFT) | layer_id,
+            .param2 = (keycode & 0x1F) << 24,
+        };
+        return true;
+    }
+    if (keycode >= QMK_QK_DEF_LAYER && keycode <= QMK_QK_DEF_LAYER_MAX) {
+        zmk_keymap_layer_id_t layer_id;
+        if (!via_layer_index_to_id(keycode & 0x1F, &layer_id) || !VIA_COMPAT_BEHAVIOR[0]) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_COMPAT_BEHAVIOR,
+            .param1 = (VIA_COMPAT_ACTION_DF << VIA_COMPAT_ACTION_SHIFT) | layer_id,
+        };
+        return true;
+    }
+    if (keycode >= QMK_QK_PERSISTENT_DEF_LAYER && keycode <= QMK_QK_PERSISTENT_DEF_LAYER_MAX) {
+        zmk_keymap_layer_id_t layer_id;
+        if (!via_layer_index_to_id(keycode & 0x1F, &layer_id) || !VIA_COMPAT_BEHAVIOR[0]) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_COMPAT_BEHAVIOR,
+            .param1 = (VIA_COMPAT_ACTION_PDF << VIA_COMPAT_ACTION_SHIFT) | layer_id,
+        };
+        return true;
+    }
+    if (keycode >= QMK_QK_ONE_SHOT_LAYER && keycode <= QMK_QK_ONE_SHOT_LAYER_MAX) {
+        zmk_keymap_layer_id_t layer_id;
+        if (!via_layer_index_to_id(keycode & 0x1F, &layer_id) || !VIA_SL_BEHAVIOR[0]) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_SL_BEHAVIOR,
+            .param1 = layer_id,
+        };
+        return true;
+    }
+    if (keycode >= QMK_QK_ONE_SHOT_MOD && keycode <= QMK_QK_ONE_SHOT_MOD_MAX) {
+        if (!VIA_COMPAT_BEHAVIOR[0]) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_COMPAT_BEHAVIOR,
+            .param1 = (VIA_COMPAT_ACTION_OSM << VIA_COMPAT_ACTION_SHIFT) |
+                      (keycode & 0x1F),
+        };
+        return true;
+    }
+    if (keycode >= QMK_QK_LAYER_TAP_TOGGLE && keycode <= QMK_QK_LAYER_TAP_TOGGLE_MAX) {
+        zmk_keymap_layer_id_t layer_id;
+        if (!via_layer_index_to_id(keycode & 0x1F, &layer_id) || !VIA_COMPAT_BEHAVIOR[0]) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_COMPAT_BEHAVIOR,
+            .param1 = (VIA_COMPAT_ACTION_TT << VIA_COMPAT_ACTION_SHIFT) | layer_id,
         };
         return true;
     }
@@ -740,6 +1073,97 @@ static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *bi
         .param1 = usage,
     };
     return true;
+}
+
+static bool via_compat_binding_to_qmk(const struct zmk_behavior_binding *binding,
+                                      uint16_t *keycode) {
+    if (!binding || !binding->behavior_dev ||
+        strcmp(binding->behavior_dev, VIA_COMPAT_BEHAVIOR) != 0) {
+        return false;
+    }
+
+    const uint8_t action = binding->param1 >> VIA_COMPAT_ACTION_SHIFT;
+    const zmk_keymap_layer_id_t layer_id = binding->param1 & 0xFF;
+    uint8_t layer_index;
+    if ((action == VIA_COMPAT_ACTION_LM || action == VIA_COMPAT_ACTION_DF ||
+         action == VIA_COMPAT_ACTION_PDF || action == VIA_COMPAT_ACTION_TT) &&
+        !via_layer_id_to_index(layer_id, &layer_index)) {
+        return false;
+    }
+
+    switch (action) {
+    case VIA_COMPAT_ACTION_LM:
+        if (layer_index >= 16 || (binding->param2 >> 24) > 0x1F) {
+            return false;
+        }
+        *keycode = QMK_QK_LAYER_MOD | ((uint16_t)layer_index << 5) |
+                   ((binding->param2 >> 24) & 0x1F);
+        return true;
+    case VIA_COMPAT_ACTION_DF:
+        *keycode = QMK_QK_DEF_LAYER | layer_index;
+        return true;
+    case VIA_COMPAT_ACTION_PDF:
+        *keycode = QMK_QK_PERSISTENT_DEF_LAYER | layer_index;
+        return true;
+    case VIA_COMPAT_ACTION_TT:
+        *keycode = QMK_QK_LAYER_TAP_TOGGLE | layer_index;
+        return true;
+    case VIA_COMPAT_ACTION_OSM:
+        *keycode = QMK_QK_ONE_SHOT_MOD | (binding->param1 & 0x1F);
+        return true;
+    case VIA_COMPAT_ACTION_MOUSE_MOVE:
+        if ((binding->param1 & 0xFF) > 3) {
+            return false;
+        }
+        *keycode = QMK_QK_MOUSE_MIN + (binding->param1 & 0xFF);
+        return true;
+    case VIA_COMPAT_ACTION_MOUSE_BUTTON:
+        if ((binding->param1 & 0xFF) > 7) {
+            return false;
+        }
+        *keycode = 0xD1 + (binding->param1 & 0xFF);
+        return true;
+    case VIA_COMPAT_ACTION_MOUSE_ACCEL:
+        if ((binding->param1 & 0xFF) > 2) {
+            return false;
+        }
+        *keycode = QMK_QK_MOUSE_MIN + 0x10 + (binding->param1 & 0xFF);
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool via_mouse_binding_to_qmk(const struct zmk_behavior_binding *binding,
+                                     uint16_t *keycode) {
+    if (!binding || !binding->behavior_dev) {
+        return false;
+    }
+    if (strcmp(binding->behavior_dev, VIA_MMV_BEHAVIOR) == 0) {
+        switch (binding->param1) {
+        case MOVE_LEFT: *keycode = 0xCD; return true;
+        case MOVE_RIGHT: *keycode = 0xCE; return true;
+        case MOVE_UP: *keycode = 0xCF; return true;
+        case MOVE_DOWN: *keycode = 0xD0; return true;
+        default: return false;
+        }
+    }
+    if (strcmp(binding->behavior_dev, VIA_MSC_BEHAVIOR) == 0) {
+        switch (binding->param1) {
+        case SCRL_UP: *keycode = 0xD9; return true;
+        case SCRL_DOWN: *keycode = 0xDA; return true;
+        case SCRL_LEFT: *keycode = 0xDB; return true;
+        case SCRL_RIGHT: *keycode = 0xDC; return true;
+        default: return false;
+        }
+    }
+    if (strcmp(binding->behavior_dev, VIA_MKP_BEHAVIOR) == 0 &&
+        binding->param1 && (binding->param1 & (binding->param1 - 1)) == 0 &&
+        binding->param1 <= BIT(4)) {
+        *keycode = 0xD1 + __builtin_ctz(binding->param1);
+        return true;
+    }
+    return false;
 }
 
 static bool via_binding_to_custom_keycode(const struct zmk_behavior_binding *binding,
@@ -822,7 +1246,14 @@ static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint1
         *keycode = QMK_QK_MACRO + binding->param1;
         return true;
     }
-    if (via_binding_to_custom_keycode(binding, keycode)) {
+    if (via_binding_to_custom_keycode(binding, keycode) ||
+        via_compat_binding_to_qmk(binding, keycode) ||
+        via_mouse_binding_to_qmk(binding, keycode)) {
+        return true;
+    }
+    if (strcmp(binding->behavior_dev, VIA_SL_BEHAVIOR) == 0 &&
+        via_layer_id_to_index(binding->param1, &basic) && basic < 32) {
+        *keycode = QMK_QK_ONE_SHOT_LAYER | basic;
         return true;
     }
     if (strcmp(binding->behavior_dev, VIA_KP_BEHAVIOR) == 0 &&
@@ -914,6 +1345,25 @@ static bool via_encoder_layer_param_to_qmk(uint32_t param, uint16_t *keycode) {
         }
         *keycode = QMK_QK_TOGGLE_LAYER | layer_index;
         return true;
+    case VIA_ENCODER_ACTION_LM:
+        if (layer_index >= 16 || (param & VIA_ENCODER_LAYER_PAYLOAD_MASK) > 0x1F) {
+            return false;
+        }
+        *keycode = QMK_QK_LAYER_MOD | ((uint16_t)layer_index << 5) |
+                   (param & VIA_ENCODER_LAYER_PAYLOAD_MASK);
+        return true;
+    case VIA_ENCODER_ACTION_DF:
+        *keycode = QMK_QK_DEF_LAYER | layer_index;
+        return true;
+    case VIA_ENCODER_ACTION_PDF:
+        *keycode = QMK_QK_PERSISTENT_DEF_LAYER | layer_index;
+        return true;
+    case VIA_ENCODER_ACTION_OSL:
+        *keycode = QMK_QK_ONE_SHOT_LAYER | layer_index;
+        return true;
+    case VIA_ENCODER_ACTION_TT:
+        *keycode = QMK_QK_LAYER_TAP_TOGGLE | layer_index;
+        return true;
     default:
         return false;
     }
@@ -955,6 +1405,23 @@ static bool via_normalize_encoder_keycode(uint16_t keycode, uint32_t *param) {
     } else if (keycode >= QMK_QK_TOGGLE_LAYER && keycode <= QMK_QK_TOGGLE_LAYER_MAX) {
         action = VIA_ENCODER_ACTION_TG;
         layer_index = keycode & 0x1F;
+    } else if (keycode >= QMK_QK_LAYER_MOD && keycode <= QMK_QK_LAYER_MOD_MAX) {
+        action = VIA_ENCODER_ACTION_LM;
+        layer_index = (keycode >> 5) & 0x0F;
+    } else if (keycode >= QMK_QK_DEF_LAYER && keycode <= QMK_QK_DEF_LAYER_MAX) {
+        action = VIA_ENCODER_ACTION_DF;
+        layer_index = keycode & 0x1F;
+    } else if (keycode >= QMK_QK_PERSISTENT_DEF_LAYER &&
+               keycode <= QMK_QK_PERSISTENT_DEF_LAYER_MAX) {
+        action = VIA_ENCODER_ACTION_PDF;
+        layer_index = keycode & 0x1F;
+    } else if (keycode >= QMK_QK_ONE_SHOT_LAYER && keycode <= QMK_QK_ONE_SHOT_LAYER_MAX) {
+        action = VIA_ENCODER_ACTION_OSL;
+        layer_index = keycode & 0x1F;
+    } else if (keycode >= QMK_QK_LAYER_TAP_TOGGLE &&
+               keycode <= QMK_QK_LAYER_TAP_TOGGLE_MAX) {
+        action = VIA_ENCODER_ACTION_TT;
+        layer_index = keycode & 0x1F;
     } else {
         return true;
     }
@@ -963,10 +1430,98 @@ static bool via_normalize_encoder_keycode(uint16_t keycode, uint32_t *param) {
         return false;
     }
 
+    uint16_t payload = (action == VIA_ENCODER_ACTION_LT) ? (keycode & 0xFFu) :
+                       (action == VIA_ENCODER_ACTION_LM) ? (keycode & 0x1Fu) : 0u;
     *param = VIA_ENCODER_LAYER_TAG | ((uint32_t)action << VIA_ENCODER_LAYER_ACTION_SHIFT) |
-             ((uint32_t)layer_id << VIA_ENCODER_LAYER_ID_SHIFT) |
-             (action == VIA_ENCODER_ACTION_LT ? (keycode & 0xFFu) : 0u);
+             ((uint32_t)layer_id << VIA_ENCODER_LAYER_ID_SHIFT) | payload;
     return true;
+}
+
+static bool via_encoder_tagged_param_to_binding(uint32_t param,
+                                                struct zmk_behavior_binding *binding) {
+    const uint8_t action =
+        (param >> VIA_ENCODER_LAYER_ACTION_SHIFT) & VIA_ENCODER_LAYER_ACTION_MASK;
+    const zmk_keymap_layer_id_t layer_id =
+        (param >> VIA_ENCODER_LAYER_ID_SHIFT) & VIA_ENCODER_LAYER_ID_MASK;
+    if ((param & VIA_ENCODER_LAYER_TAG_MASK) != VIA_ENCODER_LAYER_TAG ||
+        layer_id >= ZMK_KEYMAP_LAYERS_LEN) {
+        return false;
+    }
+
+    switch (action) {
+    case VIA_ENCODER_ACTION_LT:
+        if ((param & VIA_ENCODER_LAYER_PAYLOAD_MASK) > QMK_QK_BASIC_MAX) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_LT_BEHAVIOR,
+            .param1 = layer_id,
+            .param2 = param & VIA_ENCODER_LAYER_PAYLOAD_MASK,
+        };
+        return true;
+    case VIA_ENCODER_ACTION_TO:
+        if (param & VIA_ENCODER_LAYER_PAYLOAD_MASK) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_TO_BEHAVIOR,
+            .param1 = layer_id,
+        };
+        return true;
+    case VIA_ENCODER_ACTION_MO:
+        if (param & VIA_ENCODER_LAYER_PAYLOAD_MASK) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_MO_BEHAVIOR,
+            .param1 = layer_id,
+        };
+        return true;
+    case VIA_ENCODER_ACTION_TG:
+        if (param & VIA_ENCODER_LAYER_PAYLOAD_MASK) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_TOG_BEHAVIOR,
+            .param1 = layer_id,
+        };
+        return true;
+    case VIA_ENCODER_ACTION_LM:
+        if ((param & VIA_ENCODER_LAYER_PAYLOAD_MASK) > 0x1F) {
+            return false;
+        }
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_COMPAT_BEHAVIOR,
+            .param1 = (VIA_COMPAT_ACTION_LM << VIA_COMPAT_ACTION_SHIFT) | layer_id,
+            .param2 = (param & VIA_ENCODER_LAYER_PAYLOAD_MASK) << 24,
+        };
+        return true;
+    case VIA_ENCODER_ACTION_DF:
+        if (param & VIA_ENCODER_LAYER_PAYLOAD_MASK) return false;
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_COMPAT_BEHAVIOR,
+            .param1 = (VIA_COMPAT_ACTION_DF << VIA_COMPAT_ACTION_SHIFT) | layer_id};
+        return true;
+    case VIA_ENCODER_ACTION_PDF:
+        if (param & VIA_ENCODER_LAYER_PAYLOAD_MASK) return false;
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_COMPAT_BEHAVIOR,
+            .param1 = (VIA_COMPAT_ACTION_PDF << VIA_COMPAT_ACTION_SHIFT) | layer_id};
+        return true;
+    case VIA_ENCODER_ACTION_OSL:
+        if (param & VIA_ENCODER_LAYER_PAYLOAD_MASK || !VIA_SL_BEHAVIOR[0]) return false;
+        *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_SL_BEHAVIOR,
+                                                  .param1 = layer_id};
+        return true;
+    case VIA_ENCODER_ACTION_TT:
+        if (param & VIA_ENCODER_LAYER_PAYLOAD_MASK) return false;
+        *binding = (struct zmk_behavior_binding){
+            .behavior_dev = VIA_COMPAT_BEHAVIOR,
+            .param1 = (VIA_COMPAT_ACTION_TT << VIA_COMPAT_ACTION_SHIFT) | layer_id};
+        return true;
+    default:
+        return false;
+    }
 }
 
 
@@ -1021,9 +1576,9 @@ static bool via_write_encoder(uint8_t layer, uint8_t encoder, bool clockwise,
     }
 
     const zmk_keymap_layer_id_t layer_id = zmk_keymap_layer_index_to_id(layer);
-    const struct zmk_behavior_binding *current =
-        zmk_keymap_get_sensor_binding_at_idx(layer_id, encoder);
-    if (!via_encoder_binding_to_qmk(current, &raw_keycodes[0], &raw_keycodes[1])) {
+    struct zmk_behavior_binding current;
+    if (zmk_keymap_get_sensor_binding_copy(layer_id, encoder, &current) < 0 ||
+        !via_encoder_binding_to_qmk(&current, &raw_keycodes[0], &raw_keycodes[1])) {
         return false;
     }
 
@@ -1056,9 +1611,9 @@ static bool via_read_encoder(uint8_t layer, uint8_t encoder, bool clockwise,
     }
 
     const zmk_keymap_layer_id_t layer_id = zmk_keymap_layer_index_to_id(layer);
-    const struct zmk_behavior_binding *binding =
-        zmk_keymap_get_sensor_binding_at_idx(layer_id, encoder);
-    if (!via_encoder_binding_to_qmk(binding, &raw_keycodes[0], &raw_keycodes[1])) {
+    struct zmk_behavior_binding binding;
+    if (zmk_keymap_get_sensor_binding_copy(layer_id, encoder, &binding) < 0 ||
+        !via_encoder_binding_to_qmk(&binding, &raw_keycodes[0], &raw_keycodes[1])) {
         return false;
     }
 
@@ -1090,9 +1645,9 @@ static bool via_read_keycode(uint8_t layer, uint8_t row, uint8_t column, uint16_
     }
 
     const zmk_keymap_layer_id_t layer_id = zmk_keymap_layer_index_to_id(layer);
-    const struct zmk_behavior_binding *binding =
-        zmk_keymap_get_layer_binding_at_idx(layer_id, position);
-    if (!via_binding_to_qmk(binding, keycode)) {
+    struct zmk_behavior_binding binding;
+    if (zmk_keymap_get_layer_binding_copy(layer_id, position, &binding) < 0 ||
+        !via_binding_to_qmk(&binding, keycode)) {
         *keycode = QMK_KC_NO;
     }
     return true;
@@ -1102,10 +1657,10 @@ static bool via_binding_is_unsupported(uint8_t layer, uint8_t position) {
         return false;
     }
     const zmk_keymap_layer_id_t layer_id = zmk_keymap_layer_index_to_id(layer);
-    const struct zmk_behavior_binding *binding =
-        zmk_keymap_get_layer_binding_at_idx(layer_id, position);
+    struct zmk_behavior_binding binding;
     uint16_t keycode;
-    return binding && !via_binding_to_qmk(binding, &keycode);
+    return zmk_keymap_get_layer_binding_copy(layer_id, position, &binding) == 0 &&
+           !via_binding_to_qmk(&binding, &keycode);
 }
 
 static bool via_make_binding(uint16_t keycode, struct zmk_behavior_binding *binding) {
@@ -1135,7 +1690,8 @@ static int via_encoder_accept_data(
     ARG_UNUSED(binding);
 
     if (!sensor_config || !channel_data || channel_data_size == 0 ||
-        sensor_config->triggers_per_rotation == 0 || event.layer < 0 ||
+        sensor_config->triggers_per_rotation == 0 ||
+        sensor_config->triggers_per_rotation > 360 || event.layer < 0 ||
         event.layer >= ZMK_KEYMAP_LAYERS_LEN || event.position < ZMK_KEYMAP_LEN) {
         return -EINVAL;
     }
@@ -1194,19 +1750,18 @@ static int via_encoder_process(struct zmk_behavior_binding *binding,
     }
 
     const uint32_t raw_param = triggers > 0 ? binding->param1 : binding->param2;
-    uint16_t keycode;
-    if (!via_encoder_param_to_qmk(raw_param, &keycode)) {
-        via_encoder_triggers[sensor_index][event.layer] = 0;
-        return ZMK_BEHAVIOR_TRANSPARENT;
-    }
     if (triggers < 0) {
         triggers = -triggers;
     }
 
     struct zmk_behavior_binding translated;
-    if (!via_encoder_param_to_binding(raw_param, &translated)) {
+    bool valid = ((raw_param & VIA_ENCODER_LAYER_TAG_MASK) == VIA_ENCODER_LAYER_TAG)
+                     ? via_encoder_tagged_param_to_binding(raw_param, &translated)
+                     : via_encoder_param_to_binding(raw_param, &translated);
+    if (!valid || !translated.behavior_dev ||
+        !zmk_behavior_get_binding(translated.behavior_dev)) {
         via_encoder_triggers[sensor_index][event.layer] = 0;
-        LOG_ERR("Rejecting invalid VIA encoder keycode 0x%04X", keycode);
+        LOG_ERR("Rejecting invalid VIA encoder parameter 0x%08X", raw_param);
         return ZMK_BEHAVIOR_TRANSPARENT;
     }
 
@@ -1215,8 +1770,12 @@ static int via_encoder_process(struct zmk_behavior_binding *binding,
 #endif
 
     for (int i = 0; i < triggers; i++) {
-        (void)zmk_behavior_queue_add(&event, translated, true, 5);
-        (void)zmk_behavior_queue_add(&event, translated, false, 0);
+        int ret = zmk_behavior_queue_add_pair(&event, translated, 5);
+        if (ret < 0) {
+            LOG_ERR("VIA encoder queue exhausted (%d)", ret);
+            via_encoder_triggers[sensor_index][event.layer] = 0;
+            return ZMK_BEHAVIOR_TRANSPARENT;
+        }
     }
 
     return ZMK_BEHAVIOR_OPAQUE;
@@ -1422,11 +1981,47 @@ static bool via_rgb_set_value(uint8_t *report) {
     }
 }
 #endif
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+static bool via_indication_restore_off;
 
+static void via_indication_work_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+    if (via_indication_restore_off) {
+        (void)zmk_rgb_underglow_off();
+        via_indication_restore_off = false;
+    }
+}
+
+static K_WORK_DELAYABLE_DEFINE(via_indication_work, via_indication_work_handler);
+
+static bool via_device_indicate(uint8_t value) {
+    if (value == 0) {
+        return zmk_rgb_underglow_off() >= 0;
+    }
+    bool was_on;
+    if (zmk_rgb_underglow_get_state(&was_on) < 0 ||
+        zmk_rgb_underglow_on() < 0 ||
+        zmk_rgb_underglow_select_effect(0) < 0) {
+        return false;
+    }
+    via_indication_restore_off = !was_on;
+    k_work_reschedule(&via_indication_work, K_MSEC(250));
+    return true;
+}
+#else
+static bool via_device_indicate(uint8_t value) {
+    ARG_UNUSED(value);
+    return false;
+}
+#endif
+
+static struct k_work_delayable via_bootloader_work;
 static bool via_handle_report(uint8_t *report, bool *changed_out) {
     bool changed = false;
     bool handled = true;
     const uint8_t command = report[0];
+    via_layer_order_snapshot_valid =
+        zmk_keymap_get_layer_order_snapshot(&via_layer_order_snapshot) == 0;
 
     switch (command) {
     case VIA_CMD_GET_PROTOCOL_VERSION:
@@ -1439,19 +2034,15 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
             via_write_u32(&report[2], k_uptime_get_32());
             break;
         case VIA_VALUE_LAYOUT_OPTIONS:
-            /* Layout options are intentionally fixed: the bridge exposes one
-             * physical layout and has no mutable VIA layout flags. */
             via_write_u32(&report[2], 0);
             break;
         case VIA_VALUE_FIRMWARE_VERSION:
-            /* No application build number is exported by this ZMK revision. */
             via_write_u32(&report[2], 0x00000001);
             break;
         case VIA_VALUE_KEYCODES_VERSION:
             via_write_u32(&report[2], 0x00000008);
             break;
         case VIA_VALUE_SWITCH_MATRIX_STATE:
-            /* The virtual matrix has no electrical scan state. */
             memset(&report[2], 0, MIN(28, VIA_REPORT_SIZE - 2));
             break;
         default:
@@ -1460,9 +2051,8 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
         }
         break;
     case VIA_CMD_SET_KEYBOARD_VALUE:
-        /* Neither layout options nor device indication has mutable state in
-         * this bridge; do not ACK a write that did nothing. */
-        handled = false;
+        handled = report[1] == VIA_VALUE_DEVICE_INDICATION &&
+                  via_device_indicate(report[2]);
         break;
     case VIA_CMD_CUSTOM_SET_VALUE:
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
@@ -1507,6 +2097,9 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
         break;
     case VIA_CMD_MACRO_GET_COUNT:
         report[1] = zmk_via_macro_get_count();
+        break;
+    case VIA_CMD_BOOTLOADER_JUMP:
+        k_work_reschedule(&via_bootloader_work, K_MSEC(100));
         break;
     case VIA_CMD_MACRO_GET_BUFFER_SIZE: {
         const size_t size = zmk_via_macro_get_buffer_size();
@@ -1571,8 +2164,15 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
     if (!handled) {
         report[0] = VIA_CMD_UNHANDLED;
     }
+    via_layer_order_snapshot_valid = false;
     return handled;
 }
+static void via_bootloader_work_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+    sys_reboot(RST_UF2);
+}
+
+static K_WORK_DELAYABLE_DEFINE(via_bootloader_work, via_bootloader_work_handler);
 
 static struct k_work via_save_work;
 static uint8_t response_report[VIA_REPORT_SIZE];

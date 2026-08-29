@@ -1,0 +1,41 @@
+diff --git a/app/include/zmk/hid.h b/app/include/zmk/hid.h
+index 962180e7..c2111503 100644
+--- a/app/include/zmk/hid.h
++++ b/app/include/zmk/hid.h
+@@ -41,7 +41,7 @@
+ #error "Unknown keyboard report usages configuration"
+ #endif
+ 
+-#define ZMK_HID_MOUSE_NUM_BUTTONS 0x05
++#define ZMK_HID_MOUSE_NUM_BUTTONS 0x08
+ 
+ // See https://www.usb.org/sites/default/files/hid1_11.pdf section 6.2.2.4 Main Items
+ 
+@@ -198,12 +198,8 @@ static const uint8_t zmk_hid_report_desc[] = {
+     HID_LOGICAL_MIN8(0x00),
+     HID_LOGICAL_MAX8(0x01),
+     HID_REPORT_SIZE(0x01),
+-    HID_REPORT_COUNT(0x5),
++    HID_REPORT_COUNT(ZMK_HID_MOUSE_NUM_BUTTONS),
+     HID_INPUT(ZMK_HID_MAIN_VAL_DATA | ZMK_HID_MAIN_VAL_VAR | ZMK_HID_MAIN_VAL_ABS),
+-    // Constant padding for the last 3 bits.
+-    HID_REPORT_SIZE(0x03),
+-    HID_REPORT_COUNT(0x01),
+-    HID_INPUT(ZMK_HID_MAIN_VAL_CONST | ZMK_HID_MAIN_VAL_VAR | ZMK_HID_MAIN_VAL_ABS),
+     // Some OSes ignore pointer devices without X/Y data.
+     HID_USAGE_PAGE(HID_USAGE_GEN_DESKTOP),
+     HID_USAGE(HID_USAGE_GD_X),
+diff --git a/app/src/pointing/input_listener.c b/app/src/pointing/input_listener.c
+index 28f25300..387ee212 100644
+--- a/app/src/pointing/input_listener.c
++++ b/app/src/pointing/input_listener.c
+@@ -133,6 +133,9 @@ static void handle_key_code(const struct input_listener_config *config,
+     case INPUT_BTN_2:
+     case INPUT_BTN_3:
+     case INPUT_BTN_4:
++    case INPUT_BTN_5:
++    case INPUT_BTN_6:
++    case INPUT_BTN_7:
+         btn = evt->code - INPUT_BTN_0;
+         if (evt->value > 0) {
+             WRITE_BIT(data->mouse.button_set, btn, 1);
