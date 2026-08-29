@@ -1,3 +1,17 @@
+diff --git a/app/include/dt-bindings/zmk/pointing.h b/app/include/dt-bindings/zmk/pointing.h
+index 48246504..d6ed23c3 100644
+--- a/app/include/dt-bindings/zmk/pointing.h
++++ b/app/include/dt-bindings/zmk/pointing.h
+@@ -22,6 +22,9 @@
+ 
+ #define MB4 BIT(3)
+ #define MB5 BIT(4)
++#define MB6 BIT(5)
++#define MB7 BIT(6)
++#define MB8 BIT(7)
+ 
+ #ifndef ZMK_POINTING_DEFAULT_MOVE_VAL
+ #define ZMK_POINTING_DEFAULT_MOVE_VAL 600
 diff --git a/app/include/zmk/hid.h b/app/include/zmk/hid.h
 index 962180e7..c2111503 100644
 --- a/app/include/zmk/hid.h
@@ -25,6 +39,35 @@ index 962180e7..c2111503 100644
      // Some OSes ignore pointer devices without X/Y data.
      HID_USAGE_PAGE(HID_USAGE_GEN_DESKTOP),
      HID_USAGE(HID_USAGE_GD_X),
+diff --git a/app/src/behaviors/behavior_mouse_key_press.c b/app/src/behaviors/behavior_mouse_key_press.c
+index e62fca36..3aa07f55 100644
+--- a/app/src/behaviors/behavior_mouse_key_press.c
++++ b/app/src/behaviors/behavior_mouse_key_press.c
+@@ -26,7 +26,10 @@ static const struct behavior_parameter_value_metadata param_values[] = {
+     {.display_name = "MB2", .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE, .value = MB2},
+     {.display_name = "MB3", .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE, .value = MB3},
+     {.display_name = "MB4", .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE, .value = MB4},
+-    {.display_name = "MB5", .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE, .value = MB5}};
++    {.display_name = "MB5", .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE, .value = MB5},
++    {.display_name = "MB6", .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE, .value = MB6},
++    {.display_name = "MB7", .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE, .value = MB7},
++    {.display_name = "MB8", .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE, .value = MB8}};
+ 
+ static const struct behavior_parameter_metadata_set param_metadata_set[] = {{
+     .param1_values = param_values,
+diff --git a/app/src/hid.c b/app/src/hid.c
+index cf5a557f..64a8f07d 100644
+--- a/app/src/hid.c
++++ b/app/src/hid.c
+@@ -375,7 +375,7 @@ bool zmk_hid_is_pressed(uint32_t usage) {
+ 
+ // Keep track of how often a button was pressed.
+ // Only release the button if the count is 0.
+-static int explicit_button_counts[5] = {0, 0, 0, 0, 0};
++static int explicit_button_counts[ZMK_HID_MOUSE_NUM_BUTTONS] = {0};
+ static zmk_mod_flags_t explicit_buttons = 0;
+ 
+ #define SET_MOUSE_BUTTONS(btns)                                                                    \
 diff --git a/app/src/pointing/input_listener.c b/app/src/pointing/input_listener.c
 index 28f25300..387ee212 100644
 --- a/app/src/pointing/input_listener.c
