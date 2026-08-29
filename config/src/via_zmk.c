@@ -1987,31 +1987,11 @@ static bool via_rgb_set_value(uint8_t *report) {
 }
 #endif
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
-static bool via_indication_restore_off;
-
-static void via_indication_work_handler(struct k_work *work) {
-    ARG_UNUSED(work);
-    if (via_indication_restore_off) {
-        (void)zmk_rgb_underglow_off();
-        via_indication_restore_off = false;
-    }
-}
-
-static K_WORK_DELAYABLE_DEFINE(via_indication_work, via_indication_work_handler);
-
 static bool via_device_indicate(uint8_t value) {
-    if (value == 0) {
-        return zmk_rgb_underglow_off() >= 0;
-    }
+    ARG_UNUSED(value);
     bool was_on;
-    if (zmk_rgb_underglow_get_state(&was_on) < 0 ||
-        zmk_rgb_underglow_on() < 0 ||
-        zmk_rgb_underglow_select_effect(0) < 0) {
-        return false;
-    }
-    via_indication_restore_off = !was_on;
-    k_work_reschedule(&via_indication_work, K_MSEC(250));
-    return true;
+    return zmk_rgb_underglow_get_state(&was_on) >= 0 &&
+           zmk_rgb_underglow_set_state_runtime(!was_on) >= 0;
 }
 #else
 static bool via_device_indicate(uint8_t value) {
