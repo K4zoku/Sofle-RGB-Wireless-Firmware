@@ -83,11 +83,25 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define QMK_QK_LAYER_MOD 0x5000
 #define QMK_QK_LAYER_MOD_MAX 0x51FF
 
+#define QMK_QK_BASIC_MAX 0x00FF
+
 #define QMK_QK_MACRO 0x7700
 #define QMK_QK_MACRO_MAX 0x777F
 #define VIA_CUSTOM_KEYCODE_BASE 0x7E00
 #define VIA_CUSTOM_KEYCODE_LAST 0x7E0E
 
+#define VIA_ENCODER_LAYER_TAG_MASK 0xF0000000u
+#define VIA_ENCODER_LAYER_TAG 0xA0000000u
+#define VIA_ENCODER_LAYER_ACTION_SHIFT 24
+#define VIA_ENCODER_LAYER_ACTION_MASK 0x07u
+#define VIA_ENCODER_LAYER_ID_SHIFT 16
+#define VIA_ENCODER_LAYER_ID_MASK 0xFFu
+#define VIA_ENCODER_LAYER_PAYLOAD_MASK 0xFFFFu
+
+#define VIA_ENCODER_ACTION_LT 1
+#define VIA_ENCODER_ACTION_TO 2
+#define VIA_ENCODER_ACTION_MO 3
+#define VIA_ENCODER_ACTION_TG 4
 #if DT_NODE_EXISTS(DT_NODELABEL(kp))
 #define VIA_KP_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(kp))
 #else
@@ -193,17 +207,19 @@ static uint8_t via_qmk_mods_to_zmk(uint8_t qmk_mods) {
 
     return zmk_mods;
 }
+static bool via_zmk_mods_to_qmk(uint8_t zmk_mods, uint8_t *qmk_mods);
 static bool via_qmk_mod_to_mt_usage(uint8_t qmk_mods, uint32_t *usage) {
     const uint8_t types = qmk_mods & 0x0F;
     const bool right = (qmk_mods & BIT(4)) != 0;
+    const uint8_t base_type = types & (uint8_t)(-types);
+    const uint8_t extra_types = types ^ base_type;
     uint8_t usage_id;
 
-    /* Stock &mt has one &kp child, so a single modifier is required. */
-    if (types == 0 || (types & (types - 1)) != 0) {
+    if (types == 0) {
         return false;
     }
 
-    switch (types) {
+    switch (base_type) {
     case BIT(0):
         usage_id = 0xE0;
         break;
@@ -220,43 +236,59 @@ static bool via_qmk_mod_to_mt_usage(uint8_t qmk_mods, uint32_t *usage) {
         return false;
     }
 
-    *usage = ZMK_HID_USAGE(HID_USAGE_KEY, usage_id + (right ? 4 : 0));
+    const uint8_t extra_qmk_mods = extra_types | (extra_types && right ? BIT(4) : 0);
+    *usage = ((uint32_t)via_qmk_mods_to_zmk(extra_qmk_mods) << 24) |
+             ZMK_HID_USAGE(HID_USAGE_KEY, usage_id + (right ? 4 : 0));
     return true;
 }
 
 static bool via_mt_usage_to_qmk_mods(uint32_t usage, uint8_t *qmk_mods) {
-    if ((usage & 0xFF000000) != 0 || ZMK_HID_USAGE_PAGE(usage) != HID_USAGE_KEY) {
+    uint8_t extra_qmk_mods;
+    uint8_t base_qmk_mod;
+    const uint16_t usage_id = ZMK_HID_USAGE_ID(usage);
+
+    if (ZMK_HID_USAGE_PAGE(usage) != HID_USAGE_KEY ||
+        !via_zmk_mods_to_qmk(usage >> 24, &extra_qmk_mods)) {
         return false;
     }
 
-    switch (ZMK_HID_USAGE_ID(usage)) {
+    switch (usage_id) {
     case 0xE0:
-        *qmk_mods = BIT(0);
-        return true;
+        base_qmk_mod = BIT(0);
+        break;
     case 0xE1:
-        *qmk_mods = BIT(1);
-        return true;
+        base_qmk_mod = BIT(1);
+        break;
     case 0xE2:
-        *qmk_mods = BIT(2);
-        return true;
+        base_qmk_mod = BIT(2);
+        break;
     case 0xE3:
-        *qmk_mods = BIT(3);
-        return true;
+        base_qmk_mod = BIT(3);
+        break;
     case 0xE4:
-        *qmk_mods = BIT(0) | BIT(4);
-        return true;
+        base_qmk_mod = BIT(0) | BIT(4);
+        break;
     case 0xE5:
-        *qmk_mods = BIT(1) | BIT(4);
-        return true;
+        base_qmk_mod = BIT(1) | BIT(4);
+        break;
     case 0xE6:
-        *qmk_mods = BIT(2) | BIT(4);
-        return true;
+        base_qmk_mod = BIT(2) | BIT(4);
+        break;
     case 0xE7:
-        *qmk_mods = BIT(3) | BIT(4);
-        return true;
+        base_qmk_mod = BIT(3) | BIT(4);
+        break;
     default:
         return false;
     }
+
+    if (extra_qmk_mods != 0 &&
+        ((extra_qmk_mods & BIT(4)) != (base_qmk_mod & BIT(4)) ||
+         (extra_qmk_mods & base_qmk_mod & 0x0F) != 0)) {
+        return false;
+    }
+
+    *qmk_mods = base_qmk_mod | extra_qmk_mods;
+    return true;
 }
 
 
@@ -699,7 +731,8 @@ static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *bi
     }
 
     /* QMK LM/DF/PDF/OSL and custom ranges have no lossless ZMK equivalent. */
-    if (!via_qmk_basic_to_usage(keycode, &usage)) {
+    if (keycode > QMK_QK_BASIC_MAX ||
+        !via_qmk_basic_to_usage((uint8_t)keycode, &usage)) {
         return false;
     }
     *binding = (struct zmk_behavior_binding){
@@ -801,7 +834,8 @@ static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint1
         return true;
     }
     if (strcmp(binding->behavior_dev, VIA_MT_BEHAVIOR) == 0) {
-        if (via_usage_to_qmk_basic(binding->param2, &basic) &&
+        if ((binding->param2 >> 24) == 0 &&
+            via_usage_to_qmk_basic(binding->param2, &basic) &&
             via_mt_usage_to_qmk_mods(binding->param1, &qmk_mods)) {
             *keycode = QMK_QK_MOD_TAP | ((uint16_t)qmk_mods << 8) | basic;
             return true;
@@ -810,7 +844,8 @@ static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint1
     if (strcmp(binding->behavior_dev, VIA_LT_BEHAVIOR) == 0) {
         uint8_t layer_index;
         if (via_layer_id_to_index(binding->param1, &layer_index) &&
-            layer_index < 16 && via_usage_to_qmk_basic(binding->param2, &basic)) {
+            layer_index < 16 && (binding->param2 >> 24) == 0 &&
+            via_usage_to_qmk_basic(binding->param2, &basic)) {
             *keycode = QMK_QK_LAYER_TAP | ((uint16_t)layer_index << 8) | basic;
             return true;
         }
@@ -841,6 +876,99 @@ static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint1
 }
 
 static bool via_make_binding(uint16_t keycode, struct zmk_behavior_binding *binding);
+static bool via_encoder_layer_param_to_qmk(uint32_t param, uint16_t *keycode) {
+    const uint8_t action =
+        (param >> VIA_ENCODER_LAYER_ACTION_SHIFT) & VIA_ENCODER_LAYER_ACTION_MASK;
+    const zmk_keymap_layer_id_t layer_id =
+        (param >> VIA_ENCODER_LAYER_ID_SHIFT) & VIA_ENCODER_LAYER_ID_MASK;
+    uint8_t layer_index;
+
+    if ((param & VIA_ENCODER_LAYER_TAG_MASK) != VIA_ENCODER_LAYER_TAG ||
+        !via_layer_id_to_index(layer_id, &layer_index)) {
+        return false;
+    }
+
+    switch (action) {
+    case VIA_ENCODER_ACTION_LT:
+        if ((param & VIA_ENCODER_LAYER_PAYLOAD_MASK) > 0xFF || layer_index >= 16) {
+            return false;
+        }
+        *keycode = QMK_QK_LAYER_TAP | ((uint16_t)layer_index << 8) |
+                   (param & VIA_ENCODER_LAYER_PAYLOAD_MASK);
+        return true;
+    case VIA_ENCODER_ACTION_TO:
+        if (param & VIA_ENCODER_LAYER_PAYLOAD_MASK || layer_index >= 32) {
+            return false;
+        }
+        *keycode = QMK_QK_TO | layer_index;
+        return true;
+    case VIA_ENCODER_ACTION_MO:
+        if (param & VIA_ENCODER_LAYER_PAYLOAD_MASK || layer_index >= 32) {
+            return false;
+        }
+        *keycode = QMK_QK_MOMENTARY | layer_index;
+        return true;
+    case VIA_ENCODER_ACTION_TG:
+        if (param & VIA_ENCODER_LAYER_PAYLOAD_MASK || layer_index >= 32) {
+            return false;
+        }
+        *keycode = QMK_QK_TOGGLE_LAYER | layer_index;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool via_encoder_param_to_qmk(uint32_t param, uint16_t *keycode) {
+    if ((param & VIA_ENCODER_LAYER_TAG_MASK) == VIA_ENCODER_LAYER_TAG) {
+        return via_encoder_layer_param_to_qmk(param, keycode);
+    }
+    if (param > UINT16_MAX) {
+        return false;
+    }
+    *keycode = param;
+    return true;
+}
+
+static bool via_encoder_param_to_binding(uint32_t param,
+                                         struct zmk_behavior_binding *binding) {
+    uint16_t keycode;
+
+    return via_encoder_param_to_qmk(param, &keycode) && via_make_binding(keycode, binding);
+}
+
+static bool via_normalize_encoder_keycode(uint16_t keycode, uint32_t *param) {
+    zmk_keymap_layer_id_t layer_id;
+    uint8_t action;
+    uint8_t layer_index;
+
+    *param = keycode;
+    if (keycode >= QMK_QK_LAYER_TAP && keycode <= QMK_QK_LAYER_TAP_MAX) {
+        action = VIA_ENCODER_ACTION_LT;
+        layer_index = (keycode >> 8) & 0x0F;
+    } else if (keycode >= QMK_QK_TO && keycode <= QMK_QK_TO_MAX) {
+        action = VIA_ENCODER_ACTION_TO;
+        layer_index = keycode & 0x1F;
+    } else if (keycode >= QMK_QK_MOMENTARY && keycode <= QMK_QK_MOMENTARY_MAX) {
+        action = VIA_ENCODER_ACTION_MO;
+        layer_index = keycode & 0x1F;
+    } else if (keycode >= QMK_QK_TOGGLE_LAYER && keycode <= QMK_QK_TOGGLE_LAYER_MAX) {
+        action = VIA_ENCODER_ACTION_TG;
+        layer_index = keycode & 0x1F;
+    } else {
+        return true;
+    }
+
+    if (!via_layer_index_to_id(layer_index, &layer_id)) {
+        return false;
+    }
+
+    *param = VIA_ENCODER_LAYER_TAG | ((uint32_t)action << VIA_ENCODER_LAYER_ACTION_SHIFT) |
+             ((uint32_t)layer_id << VIA_ENCODER_LAYER_ID_SHIFT) |
+             (action == VIA_ENCODER_ACTION_LT ? (keycode & 0xFFu) : 0u);
+    return true;
+}
+
 
 static bool via_legacy_encoder_param_to_qmk(uint32_t param, uint16_t *keycode) {
     uint8_t basic;
@@ -866,12 +994,8 @@ static bool via_encoder_binding_to_qmk(const struct zmk_behavior_binding *bindin
     }
 
     if (strcmp(binding->behavior_dev, VIA_ENCODER_BEHAVIOR) == 0) {
-        if (binding->param1 > UINT16_MAX || binding->param2 > UINT16_MAX) {
-            return false;
-        }
-        *clockwise = binding->param1;
-        *counterclockwise = binding->param2;
-        return true;
+        return via_encoder_param_to_qmk(binding->param1, clockwise) &&
+               via_encoder_param_to_qmk(binding->param2, counterclockwise);
     }
 
     if (strcmp(binding->behavior_dev, VIA_INC_DEC_KP_BEHAVIOR) == 0) {
@@ -884,7 +1008,11 @@ static bool via_encoder_binding_to_qmk(const struct zmk_behavior_binding *bindin
 
 static bool via_write_encoder(uint8_t layer, uint8_t encoder, bool clockwise,
                               uint16_t keycode) {
+    if (!IS_ENABLED(CONFIG_ZMK_VIA_ENCODER)) {
+        return false;
+    }
     uint16_t raw_keycodes[2];
+    uint32_t stored_keycodes[2];
     struct zmk_behavior_binding updated;
 
     if (layer >= ZMK_KEYMAP_LAYERS_LEN || encoder >= ZMK_KEYMAP_SENSORS_LEN ||
@@ -902,21 +1030,25 @@ static bool via_write_encoder(uint8_t layer, uint8_t encoder, bool clockwise,
     raw_keycodes[clockwise ? 0 : 1] = keycode;
     for (size_t i = 0; i < ARRAY_SIZE(raw_keycodes); i++) {
         struct zmk_behavior_binding translated;
-        if (!via_make_binding(raw_keycodes[i], &translated)) {
+        if (!via_make_binding(raw_keycodes[i], &translated) ||
+            !via_normalize_encoder_keycode(raw_keycodes[i], &stored_keycodes[i])) {
             return false;
         }
     }
 
     updated = (struct zmk_behavior_binding){
         .behavior_dev = VIA_ENCODER_BEHAVIOR,
-        .param1 = raw_keycodes[0],
-        .param2 = raw_keycodes[1],
+        .param1 = stored_keycodes[0],
+        .param2 = stored_keycodes[1],
     };
     return zmk_keymap_set_sensor_binding_at_idx(layer_id, encoder, updated) >= 0;
 }
 
 static bool via_read_encoder(uint8_t layer, uint8_t encoder, bool clockwise,
                              uint16_t *keycode) {
+    if (!IS_ENABLED(CONFIG_ZMK_VIA_ENCODER)) {
+        return false;
+    }
     uint16_t raw_keycodes[2];
 
     if (layer >= ZMK_KEYMAP_LAYERS_LEN || encoder >= ZMK_KEYMAP_SENSORS_LEN) {
@@ -977,7 +1109,9 @@ static bool via_binding_is_unsupported(uint8_t layer, uint8_t position) {
 }
 
 static bool via_make_binding(uint16_t keycode, struct zmk_behavior_binding *binding) {
-    if (!via_qmk_to_binding(keycode, binding)) {
+    if (!binding || !via_qmk_to_binding(keycode, binding) || !binding->behavior_dev ||
+        !binding->behavior_dev[0] ||
+        !zmk_behavior_get_binding(binding->behavior_dev)) {
         return false;
     }
     if (zmk_behavior_validate_binding(binding) >= 0) {
@@ -1059,18 +1193,18 @@ static int via_encoder_process(struct zmk_behavior_binding *binding,
         return ZMK_BEHAVIOR_TRANSPARENT;
     }
 
-    const uint32_t raw_keycode = triggers > 0 ? binding->param1 : binding->param2;
-    if (raw_keycode > UINT16_MAX) {
+    const uint32_t raw_param = triggers > 0 ? binding->param1 : binding->param2;
+    uint16_t keycode;
+    if (!via_encoder_param_to_qmk(raw_param, &keycode)) {
         via_encoder_triggers[sensor_index][event.layer] = 0;
         return ZMK_BEHAVIOR_TRANSPARENT;
     }
-    const uint16_t keycode = raw_keycode;
     if (triggers < 0) {
         triggers = -triggers;
     }
 
     struct zmk_behavior_binding translated;
-    if (!via_make_binding(keycode, &translated)) {
+    if (!via_encoder_param_to_binding(raw_param, &translated)) {
         via_encoder_triggers[sensor_index][event.layer] = 0;
         LOG_ERR("Rejecting invalid VIA encoder keycode 0x%04X", keycode);
         return ZMK_BEHAVIOR_TRANSPARENT;
@@ -1093,8 +1227,10 @@ static const struct behavior_driver_api via_encoder_driver_api = {
     .sensor_binding_process = via_encoder_process,
 };
 
+#if IS_ENABLED(CONFIG_ZMK_VIA_ENCODER)
 BEHAVIOR_DT_DEFINE(DT_NODELABEL(via_encoder), NULL, NULL, NULL, NULL, POST_KERNEL,
                    CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &via_encoder_driver_api);
+#endif
 
 static bool via_write_keycode(uint8_t layer, uint8_t row, uint8_t column, uint16_t keycode) {
     uint8_t position;
@@ -1139,7 +1275,6 @@ static bool via_get_buffer(uint16_t offset, uint8_t size, uint8_t *data) {
 static bool via_set_buffer(uint16_t offset, uint8_t size, const uint8_t *data) {
     struct zmk_behavior_binding bindings[14];
     zmk_keymap_layer_id_t layer_ids[14];
-    uint8_t layers[14];
     uint8_t positions[14];
     const uint8_t count = size / 2;
 
@@ -1163,11 +1298,9 @@ static bool via_set_buffer(uint16_t offset, uint8_t size, const uint8_t *data) {
             if (keycode != QMK_KC_NO) {
                 return false;
             }
-            layers[i] = layer;
             positions[i] = UINT8_MAX;
             continue;
         }
-        layers[i] = layer;
         if (keycode == QMK_KC_NO && via_binding_is_unsupported(layer, positions[i])) {
             positions[i] = UINT8_MAX;
             continue;
@@ -1306,9 +1439,12 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
             via_write_u32(&report[2], k_uptime_get_32());
             break;
         case VIA_VALUE_LAYOUT_OPTIONS:
+            /* Layout options are intentionally fixed: the bridge exposes one
+             * physical layout and has no mutable VIA layout flags. */
             via_write_u32(&report[2], 0);
             break;
         case VIA_VALUE_FIRMWARE_VERSION:
+            /* No application build number is exported by this ZMK revision. */
             via_write_u32(&report[2], 0x00000001);
             break;
         case VIA_VALUE_KEYCODES_VERSION:
@@ -1324,9 +1460,9 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
         }
         break;
     case VIA_CMD_SET_KEYBOARD_VALUE:
-        if (report[1] != VIA_VALUE_LAYOUT_OPTIONS && report[1] != VIA_VALUE_DEVICE_INDICATION) {
-            handled = false;
-        }
+        /* Neither layout options nor device indication has mutable state in
+         * this bridge; do not ACK a write that did nothing. */
+        handled = false;
         break;
     case VIA_CMD_CUSTOM_SET_VALUE:
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
@@ -1456,12 +1592,12 @@ static void via_save_work_handler(struct k_work *work) {
 
 static int via_raw_hid_received_listener(const zmk_event_t *event) {
     const struct raw_hid_received_event *received = as_raw_hid_received_event(event);
-    if (!received || received->length < 1) {
+    if (!received || !received->data || received->length != VIA_REPORT_SIZE) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
     memset(response_report, 0, sizeof(response_report));
-    memcpy(response_report, received->data, MIN(received->length, sizeof(response_report)));
+    memcpy(response_report, received->data, VIA_REPORT_SIZE);
 
     bool changed = false;
     (void)via_handle_report(response_report, &changed);

@@ -4,7 +4,7 @@ menuconfig ZMK_VIA
     depends on ZMK_SPLIT_ROLE_CENTRAL
     depends on ZMK_KEYMAP_SETTINGS_STORAGE
     depends on DT_HAS_ZMK_VIA_MATRIX_ENABLED
-    default y
+    default n
     help
       Expose the current ZMK runtime keymap through the QMK/VIA Raw HID
       protocol. A board/keymap must provide a zmk,via-matrix node with
@@ -39,7 +39,7 @@ config ZMK_VIA_MACRO_DELAY_MS
     help
       Delay between queued macro key press and release events.
 
-config ZMK_VIA_ENCODER_READ
+config ZMK_VIA_ENCODER
     bool "Expose and persist encoder bindings to VIA"
     depends on ZMK_VIA
     default n

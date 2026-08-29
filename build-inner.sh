@@ -18,9 +18,7 @@ echo "==> west update"
 
 west update
 ZMK_REV="edf5c0814fd3ea202e43aad2d68fd32e882a518c"
-ZMK_PATCH="${CONFIG}/patches/zmk-sensor-get.patch"
 git -C /workspace/zmk reset --hard "${ZMK_REV}" >/dev/null
-git -C /workspace/zmk apply "${ZMK_PATCH}"
 ZMK_RGB_PATCH="${CONFIG}/patches/zmk-rgb-via.patch"
 git -C /workspace/zmk apply "${ZMK_RGB_PATCH}"
 ZMK_ENCODER_PATCH="${CONFIG}/patches/zmk-encoder-persistence.patch"
