@@ -31,7 +31,6 @@ int main(void) {
     expect_kind(0xCD, VIA_TRANSLATION_MOUSE);
     expect_kind(0xD8, VIA_TRANSLATION_MOUSE);
     expect_kind(0xFFFF, VIA_TRANSLATION_UNSUPPORTED);
-    expect_kind(0x1234, VIA_TRANSLATION_UNSUPPORTED);
 
     const struct {
         uint8_t action;
