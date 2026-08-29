@@ -40,6 +40,11 @@
     };
 
     behaviors {
+        via_encoder: via_encoder {
+            compatible = "zmk,via-encoder";
+            #binding-cells = <1>;
+            #sensor-binding-cells = <2>;
+        };
         via_macro: via_macro {
             compatible = "zmk,via-macro";
             #binding-cells = <1>;

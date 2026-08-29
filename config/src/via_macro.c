@@ -178,18 +178,31 @@ struct via_macro_action {
     uint32_t delay_ms;
     size_t next_offset;
 };
+static bool via_macro_parse_action_locked(size_t offset, struct via_macro_action *action);
 
 static bool via_macro_find_start_locked(uint8_t id, size_t *offset) {
     size_t current = 0;
+    const size_t buffer_size = ARRAY_SIZE(via_macro_buffer);
 
     for (uint8_t macro = 0; macro < id; macro++) {
-        while (current < ARRAY_SIZE(via_macro_buffer) && via_macro_buffer[current] != 0) {
-            current++;
+        bool terminated = false;
+
+        while (current < buffer_size) {
+            struct via_macro_action action;
+            if (!via_macro_parse_action_locked(current, &action) ||
+                action.next_offset <= current || action.next_offset > buffer_size) {
+                return false;
+            }
+            current = action.next_offset;
+            if (action.kind == VIA_MACRO_ACTION_END) {
+                terminated = true;
+                break;
+            }
         }
-        if (current == ARRAY_SIZE(via_macro_buffer)) {
+
+        if (!terminated) {
             return false;
         }
-        current++;
     }
 
     *offset = current;
