@@ -882,6 +882,20 @@ static bool via_get_macro_buffer(uint16_t offset, uint8_t size, uint8_t *data) {
 }
 
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+static uint8_t via_rgb_speed_to_via(uint8_t speed) {
+    if (speed < 1 || speed > 5) {
+        return 0;
+    }
+
+    /* Use the five evenly spaced canonical values across the VIA range. */
+    return ((uint16_t)(speed - 1) * UINT8_MAX + 2) / 4;
+}
+
+static uint8_t via_rgb_speed_from_via(uint8_t value) {
+    /* Round to the nearest of the five ZMK speed levels. */
+    return MIN(5, (uint8_t)(1 + (((uint16_t)value * 4 + 127) / UINT8_MAX)));
+}
+
 static bool via_rgb_get_value(uint8_t *report) {
     if (report[1] != VIA_RGBLIGHT_CHANNEL) {
         return false;
@@ -904,7 +918,7 @@ static bool via_rgb_get_value(uint8_t *report) {
         return true;
     }
     case VIA_RGB_EFFECT_SPEED:
-        report[3] = ((uint16_t)zmk_rgb_underglow_get_speed() * UINT8_MAX) / 5;
+        report[3] = via_rgb_speed_to_via(zmk_rgb_underglow_get_speed());
         return true;
     case VIA_RGB_COLOR:
         report[3] = ((uint32_t)color.h * UINT8_MAX) / 360;
@@ -936,10 +950,8 @@ static bool via_rgb_set_value(uint8_t *report) {
         return report[3] <= VIA_RGB_EFFECT_COUNT &&
                zmk_rgb_underglow_on() >= 0 &&
                zmk_rgb_underglow_select_effect(report[3] - 1) >= 0;
-    case VIA_RGB_EFFECT_SPEED: {
-        const uint8_t speed = MAX(1, MIN(5, ((uint16_t)report[3] * 5 + 127) / UINT8_MAX));
-        return zmk_rgb_underglow_set_speed(speed) >= 0;
-    }
+    case VIA_RGB_EFFECT_SPEED:
+        return zmk_rgb_underglow_set_speed(via_rgb_speed_from_via(report[3])) >= 0;
     case VIA_RGB_COLOR:
         color.h = ((uint32_t)report[3] * 360 + 127) / UINT8_MAX;
         color.s = ((uint16_t)report[4] * 100 + 127) / UINT8_MAX;

@@ -2,7 +2,49 @@
   "name": "Sofle ZMK VIA",
   "vendorId": "0x1D50",
   "productId": "0x615E",
-  "menus": ["qmk_rgblight"],
+  "menus": [
+    {
+      "label": "Lighting",
+      "content": [
+        {
+          "label": "ZMK Underglow",
+          "content": [
+            {
+              "label": "Brightness",
+              "type": "range",
+              "options": [0, 255],
+              "content": ["id_zmk_rgb_brightness", 2, 1]
+            },
+            {
+              "label": "Effect",
+              "type": "dropdown",
+              "options": [
+                ["Off", 0],
+                ["Solid", 1],
+                ["Breathe", 2],
+                ["Spectrum", 3],
+                ["Swirl", 4]
+              ],
+              "content": ["id_zmk_rgb_effect", 2, 2]
+            },
+            {
+              "showIf": "{id_zmk_rgb_effect} >= 2",
+              "label": "Speed",
+              "type": "range",
+              "options": [0, 255],
+              "content": ["id_zmk_rgb_speed", 2, 3]
+            },
+            {
+              "showIf": "{id_zmk_rgb_effect} > 0",
+              "label": "Color",
+              "type": "color",
+              "content": ["id_zmk_rgb_color", 2, 4]
+            }
+          ]
+        }
+      ]
+    }
+  ],
   "matrix": {
     "rows": 10,
     "cols": 7
