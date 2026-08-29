@@ -15,6 +15,22 @@
         map = <0 1 2 3 4 5 6 7 8>;
     };
 
+    behaviors {
+        via_encoder: via_encoder {
+            compatible = "zmk,via-encoder";
+            #binding-cells = <1>;
+            #sensor-binding-cells = <2>;
+        };
+        via_macro: via_macro {
+            compatible = "zmk,via-macro";
+            #binding-cells = <1>;
+        };
+        via_compat: via_compat {
+            compatible = "zmk,via-compat";
+            #binding-cells = <2>;
+        };
+    };
+
     sensors: sensors {
         compatible = "zmk,keymap-sensors";
         sensors = <&encoder_1>;

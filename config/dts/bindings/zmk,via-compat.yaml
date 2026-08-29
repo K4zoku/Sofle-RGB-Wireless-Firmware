@@ -1,0 +1,3 @@
+description: VIA compatibility behavior for QMK layer, mouse, and modifier keycodes
+compatible: "zmk,via-compat"
+include: two_param.yaml

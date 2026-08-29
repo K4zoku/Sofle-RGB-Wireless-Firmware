@@ -38,6 +38,22 @@
             55 56 57 58 59 0xFF 0xFF
         >;
     };
+
+    behaviors {
+        via_encoder: via_encoder {
+            compatible = "zmk,via-encoder";
+            #binding-cells = <1>;
+            #sensor-binding-cells = <2>;
+        };
+        via_macro: via_macro {
+            compatible = "zmk,via-macro";
+            #binding-cells = <1>;
+        };
+        via_compat: via_compat {
+            compatible = "zmk,via-compat";
+            #binding-cells = <2>;
+        };
+    };
     // Activate ADJUST layer by pressing raise and lower
 
     conditional_layers {
@@ -136,4 +152,14 @@
             >;
         };
     };
+};
+
+&left_encoder {
+    a-gpios = <&pro_micro 20 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+    b-gpios = <&pro_micro 21 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+};
+
+&right_encoder {
+    a-gpios = <&pro_micro 21 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+    b-gpios = <&pro_micro 20 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
 };

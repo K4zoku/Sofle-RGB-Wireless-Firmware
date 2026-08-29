@@ -1,0 +1,79 @@
+diff --git a/app/include/zmk/behavior_queue.h b/app/include/zmk/behavior_queue.h
+index b942bd28..50593733 100644
+--- a/app/include/zmk/behavior_queue.h
++++ b/app/include/zmk/behavior_queue.h
+@@ -12,3 +12,6 @@
+ 
+ int zmk_behavior_queue_add(const struct zmk_behavior_binding_event *event,
+                            const struct zmk_behavior_binding behavior, bool press, uint32_t wait);
++
++int zmk_behavior_queue_add_pair(const struct zmk_behavior_binding_event *event,
++                                const struct zmk_behavior_binding binding, uint32_t wait);
+diff --git a/app/src/behavior_queue.c b/app/src/behavior_queue.c
+index 82c58ca8..52b864ed 100644
+--- a/app/src/behavior_queue.c
++++ b/app/src/behavior_queue.c
+@@ -24,6 +24,7 @@ struct q_item {
+ };
+ 
+ K_MSGQ_DEFINE(zmk_behavior_queue_msgq, sizeof(struct q_item), CONFIG_ZMK_BEHAVIORS_QUEUE_SIZE, 4);
++K_MUTEX_DEFINE(zmk_behavior_queue_mutex);
+ 
+ static void behavior_queue_process_next(struct k_work *work);
+ static K_WORK_DELAYABLE_DEFINE(queue_work, behavior_queue_process_next);
+@@ -56,9 +57,8 @@ static void behavior_queue_process_next(struct k_work *work) {
+         }
+     }
+ }
+-
+-int zmk_behavior_queue_add(const struct zmk_behavior_binding_event *event,
+-                           const struct zmk_behavior_binding binding, bool press, uint32_t wait) {
++static int queue_put(const struct zmk_behavior_binding_event *event,
++                     const struct zmk_behavior_binding binding, bool press, uint32_t wait) {
+     struct q_item item = {
+         .press = press,
+         .binding = binding,
+@@ -68,8 +68,14 @@ int zmk_behavior_queue_add(const struct zmk_behavior_binding_event *event,
+         .source = event->source,
+ #endif
+     };
++    return k_msgq_put(&zmk_behavior_queue_msgq, &item, K_NO_WAIT);
++}
+ 
+-    const int ret = k_msgq_put(&zmk_behavior_queue_msgq, &item, K_NO_WAIT);
++int zmk_behavior_queue_add(const struct zmk_behavior_binding_event *event,
++                           const struct zmk_behavior_binding binding, bool press, uint32_t wait) {
++    k_mutex_lock(&zmk_behavior_queue_mutex, K_FOREVER);
++    const int ret = queue_put(event, binding, press, wait);
++    k_mutex_unlock(&zmk_behavior_queue_mutex);
+     if (ret < 0) {
+         return ret;
+     }
+@@ -77,6 +83,27 @@ int zmk_behavior_queue_add(const struct zmk_behavior_binding_event *event,
+     if (!k_work_delayable_is_pending(&queue_work)) {
+         behavior_queue_process_next(&queue_work.work);
+     }
++    return 0;
++}
+ 
++int zmk_behavior_queue_add_pair(const struct zmk_behavior_binding_event *event,
++                                const struct zmk_behavior_binding binding, uint32_t wait) {
++    k_mutex_lock(&zmk_behavior_queue_mutex, K_FOREVER);
++    if (k_msgq_num_free_get(&zmk_behavior_queue_msgq) < 2) {
++        k_mutex_unlock(&zmk_behavior_queue_mutex);
++        return -ENOSPC;
++    }
++    int ret = queue_put(event, binding, true, wait);
++    if (ret == 0) {
++        ret = queue_put(event, binding, false, 0);
++    }
++    k_mutex_unlock(&zmk_behavior_queue_mutex);
++    if (ret < 0) {
++        return ret;
++    }
++
++    if (!k_work_delayable_is_pending(&queue_work)) {
++        behavior_queue_process_next(&queue_work.work);
++    }
+     return 0;
+ }

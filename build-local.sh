@@ -6,7 +6,7 @@
 #
 # Usage:
 #   ./build-local.sh              # build all targets
-#   ./build-local.sh sofle_left   # build one target (sofle_left | sofle_right | settings_reset)
+#   ./build-local.sh sofle_left   # build one target (sofle_left | sofle_right | settings_reset | pipar_flake)
 #
 # Artifacts land in build/<shield>/zephyr/zmk.uf2
 # The west workspace (.west/, zmk/, zephyr/, modules/) persists in this repo

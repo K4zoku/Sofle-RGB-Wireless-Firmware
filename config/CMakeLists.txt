@@ -1,5 +1,5 @@
 if(CONFIG_ZMK_VIA)
   zephyr_library()
-  zephyr_library_sources(src/via_zmk.c)
-  zephyr_include_directories(include)
+    zephyr_library_sources(src/via_zmk.c src/via_macro.c src/via_translation.c)
+    zephyr_include_directories(include)
 endif()
