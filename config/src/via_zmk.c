@@ -400,6 +400,7 @@ static int via_compat_keycode_listener(const zmk_event_t *event) {
 }
 
 extern int behavior_input_two_axis_adjust_speed(const struct device *, int16_t, int16_t);
+extern int behavior_input_two_axis_set_fixed_speed(const struct device *, bool);
 
 static uint8_t via_mouse_accel_bit(uint8_t mode) {
     switch (mode) {
@@ -421,6 +422,11 @@ static int16_t via_mouse_effective_speed(uint8_t action) {
         return max_speed / 2;
     }
     return max_speed;
+}
+
+static int via_mouse_set_cursor_fixed_speed(void) {
+    const struct device *dev = zmk_behavior_get_binding(VIA_MMV_BEHAVIOR);
+    return dev ? behavior_input_two_axis_set_fixed_speed(dev, via_mouse_accel_mask != 0) : 0;
 }
 
 static int via_mouse_binding_vector(uint8_t action, uint8_t value, int16_t *dx, int16_t *dy) {
@@ -465,6 +471,11 @@ static int via_mouse_adjust(uint8_t action, uint8_t value, int16_t speed) {
 }
 
 static int via_mouse_update_active_speeds(void) {
+    int ret = via_mouse_set_cursor_fixed_speed();
+    if (ret < 0) {
+        return ret;
+    }
+
     for (size_t position = 0; position < ARRAY_SIZE(via_mouse_bindings); position++) {
         struct via_mouse_binding_state *state = &via_mouse_bindings[position];
         if (state->action == 0) {
@@ -2190,11 +2201,6 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
         break;
     case VIA_CMD_EEPROM_RESET: {
         int ret = zmk_keymap_reset_dynamic_settings();
-        if (ret < 0) {
-            handled = false;
-            break;
-        }
-        ret = zmk_keymap_set_default_layer(0, true);
         if (ret < 0) {
             handled = false;
             break;
