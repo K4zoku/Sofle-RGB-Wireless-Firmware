@@ -134,6 +134,7 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #define VIA_COMPAT_ACTION_OSM 5
 #define VIA_COMPAT_ACTION_MOUSE_ACCEL 6
 #define VIA_COMPAT_ACTION_MOUSE_MOVE 7
+#define VIA_COMPAT_ACTION_MOUSE_SCROLL 8
 #define VIA_COMPAT_ACTION_SHIFT 24
 #if DT_NODE_EXISTS(DT_NODELABEL(kp))
 #define VIA_KP_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(kp))
@@ -361,10 +362,15 @@ static bool via_zmk_mods_to_qmk(uint8_t zmk_mods, uint8_t *qmk_mods) {
     *qmk_mods = left ? left : (right ? (right | BIT(4)) : 0);
     return true;
 }
-
 static zmk_mod_flags_t via_oneshot_mods;
-static uint8_t via_mouse_acceleration;
-static uint8_t via_mouse_move_acceleration[ZMK_KEYMAP_LEN];
+struct via_mouse_binding_state {
+    uint8_t action;
+    uint8_t value;
+    int16_t speed;
+};
+
+static uint8_t via_mouse_accel_mask;
+static struct via_mouse_binding_state via_mouse_bindings[ZMK_KEYMAP_LEN];
 static uint32_t via_tt_press_time[ZMK_KEYMAP_LEN];
 static uint32_t via_tt_last_tap_time[ZMK_KEYMAP_LEN];
 static uint8_t via_tt_tap_count[ZMK_KEYMAP_LEN];
@@ -389,16 +395,88 @@ static int via_compat_keycode_listener(const zmk_event_t *event) {
     return ZMK_EV_EVENT_BUBBLE;
 }
 
-static void via_mouse_move_vector(uint8_t value, int16_t *dx, int16_t *dy) {
+extern int behavior_input_two_axis_adjust_speed(const struct device *, int16_t, int16_t);
+
+static uint8_t via_mouse_accel_bit(uint8_t mode) {
+    switch (mode) {
+    case 0: return BIT(0);
+    case 1: return BIT(1);
+    case 2: return BIT(2);
+    default: return 0;
+    }
+}
+
+static int16_t via_mouse_effective_speed(uint8_t action) {
+    const int16_t max_speed =
+        action == VIA_COMPAT_ACTION_MOUSE_SCROLL ? ZMK_POINTING_DEFAULT_SCRL_VAL
+                                                 : ZMK_POINTING_DEFAULT_MOVE_VAL;
+    if (via_mouse_accel_mask & BIT(0)) {
+        return max_speed / 4;
+    }
+    if (via_mouse_accel_mask & BIT(1)) {
+        return max_speed / 2;
+    }
+    return max_speed;
+}
+
+static int via_mouse_binding_vector(uint8_t action, uint8_t value, int16_t *dx, int16_t *dy) {
     *dx = 0;
     *dy = 0;
-    switch (value) {
-    case 0: *dy = MOVE_Y_DECODE(MOVE_UP); break;
-    case 1: *dy = MOVE_Y_DECODE(MOVE_DOWN); break;
-    case 2: *dx = MOVE_X_DECODE(MOVE_LEFT); break;
-    case 3: *dx = MOVE_X_DECODE(MOVE_RIGHT); break;
-    default: break;
+    if (action == VIA_COMPAT_ACTION_MOUSE_MOVE) {
+        switch (value) {
+        case 0: *dy = MOVE_Y_DECODE(MOVE_UP); break;
+        case 1: *dy = MOVE_Y_DECODE(MOVE_DOWN); break;
+        case 2: *dx = MOVE_X_DECODE(MOVE_LEFT); break;
+        case 3: *dx = MOVE_X_DECODE(MOVE_RIGHT); break;
+        default: return -EINVAL;
+        }
+    } else if (action == VIA_COMPAT_ACTION_MOUSE_SCROLL) {
+        switch (value) {
+        case 0: *dy = MOVE_Y_DECODE(SCRL_UP); break;
+        case 1: *dy = MOVE_Y_DECODE(SCRL_DOWN); break;
+        case 2: *dx = MOVE_X_DECODE(SCRL_LEFT); break;
+        case 3: *dx = MOVE_X_DECODE(SCRL_RIGHT); break;
+        default: return -EINVAL;
+        }
+    } else {
+        return -EINVAL;
     }
+    return 0;
+}
+
+static int via_mouse_adjust(uint8_t action, uint8_t value, int16_t speed) {
+    int16_t dx;
+    int16_t dy;
+    int ret = via_mouse_binding_vector(action, value, &dx, &dy);
+    if (ret < 0) {
+        return ret;
+    }
+    dx *= speed;
+    dy *= speed;
+    const char *behavior_dev = action == VIA_COMPAT_ACTION_MOUSE_SCROLL
+                                   ? VIA_MSC_BEHAVIOR
+                                   : VIA_MMV_BEHAVIOR;
+    const struct device *dev = zmk_behavior_get_binding(behavior_dev);
+    return dev ? behavior_input_two_axis_adjust_speed(dev, dx, dy) : -ENODEV;
+}
+
+static int via_mouse_update_active_speeds(void) {
+    for (size_t position = 0; position < ARRAY_SIZE(via_mouse_bindings); position++) {
+        struct via_mouse_binding_state *state = &via_mouse_bindings[position];
+        if (state->action == 0) {
+            continue;
+        }
+        const int16_t speed = via_mouse_effective_speed(state->action);
+        const int16_t delta = speed - state->speed;
+        if (delta != 0) {
+            int ret = via_mouse_adjust(state->action, state->value, delta);
+            if (ret < 0) {
+                return ret;
+            }
+            state->speed = speed;
+        }
+    }
+    return 0;
 }
 
 static int via_compat_binding_pressed(struct zmk_behavior_binding *binding,
@@ -419,21 +497,25 @@ static int via_compat_binding_pressed(struct zmk_behavior_binding *binding,
         via_oneshot_mods = via_qmk_mods_to_zmk(value);
         k_work_reschedule(&via_oneshot_release_work, K_MSEC(5000));
         return zmk_hid_register_mods(via_oneshot_mods);
-    case VIA_COMPAT_ACTION_MOUSE_ACCEL:
-        via_mouse_acceleration = MIN(value, 2);
-        return 0;
-    case VIA_COMPAT_ACTION_MOUSE_MOVE: {
+    case VIA_COMPAT_ACTION_MOUSE_ACCEL: {
+        const uint8_t bit = via_mouse_accel_bit(value);
+        if (!bit) {
+            return -EINVAL;
+        }
+        via_mouse_accel_mask |= bit;
+        return via_mouse_update_active_speeds();
+    }
+    case VIA_COMPAT_ACTION_MOUSE_MOVE:
+    case VIA_COMPAT_ACTION_MOUSE_SCROLL: {
         if (event.position >= ZMK_KEYMAP_LEN) return -EINVAL;
-        via_mouse_move_acceleration[event.position] = via_mouse_acceleration;
-        const int16_t speed = 1 << via_mouse_move_acceleration[event.position];
-        int16_t dx;
-        int16_t dy;
-        via_mouse_move_vector(value, &dx, &dy);
-        dx *= speed;
-        dy *= speed;
-        extern int behavior_input_two_axis_adjust_speed(const struct device *, int16_t, int16_t);
-        return behavior_input_two_axis_adjust_speed(zmk_behavior_get_binding(VIA_MMV_BEHAVIOR),
-                                                    dx, dy);
+        const int16_t speed = via_mouse_effective_speed(action);
+        int ret = via_mouse_adjust(action, value, speed);
+        if (ret < 0) {
+            return ret;
+        }
+        via_mouse_bindings[event.position] =
+            (struct via_mouse_binding_state){.action = action, .value = value, .speed = speed};
+        return 0;
     }
     case VIA_COMPAT_ACTION_TT:
         if (event.position >= ZMK_KEYMAP_LEN) {
@@ -460,17 +542,27 @@ static int via_compat_binding_released(struct zmk_behavior_binding *binding,
     case VIA_COMPAT_ACTION_LM:
         zmk_hid_unregister_mods(via_qmk_mods_to_zmk(binding->param2 >> 24));
         return zmk_keymap_layer_deactivate(value);
-    case VIA_COMPAT_ACTION_MOUSE_MOVE: {
+    case VIA_COMPAT_ACTION_MOUSE_ACCEL: {
+        const uint8_t bit = via_mouse_accel_bit(value);
+        if (!bit) {
+            return -EINVAL;
+        }
+        via_mouse_accel_mask &= ~bit;
+        return via_mouse_update_active_speeds();
+    }
+    case VIA_COMPAT_ACTION_MOUSE_MOVE:
+    case VIA_COMPAT_ACTION_MOUSE_SCROLL: {
         if (event.position >= ZMK_KEYMAP_LEN) return -EINVAL;
-        const int16_t speed = 1 << via_mouse_move_acceleration[event.position];
-        int16_t dx;
-        int16_t dy;
-        via_mouse_move_vector(value, &dx, &dy);
-        dx *= -speed;
-        dy *= -speed;
-        extern int behavior_input_two_axis_adjust_speed(const struct device *, int16_t, int16_t);
-        return behavior_input_two_axis_adjust_speed(zmk_behavior_get_binding(VIA_MMV_BEHAVIOR),
-                                                    dx, dy);
+        struct via_mouse_binding_state *state = &via_mouse_bindings[event.position];
+        if (state->action != action) {
+            return 0;
+        }
+        int ret = via_mouse_adjust(state->action, state->value, -state->speed);
+        if (ret < 0) {
+            return ret;
+        }
+        *state = (struct via_mouse_binding_state){0};
+        return 0;
     }
     case VIA_COMPAT_ACTION_TT:
         if (event.position >= ZMK_KEYMAP_LEN) {
@@ -871,22 +963,10 @@ static bool via_qmk_mouse_to_binding(uint8_t keycode, struct zmk_behavior_bindin
             .param1 = BIT(keycode - 0xD1),
         };
         return true;
-    case 0xD9:
-        *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_MSC_BEHAVIOR,
-                                                  .param1 = SCRL_UP};
-        return true;
-    case 0xDA:
-        *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_MSC_BEHAVIOR,
-                                                  .param1 = SCRL_DOWN};
-        return true;
-    case 0xDB:
-        *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_MSC_BEHAVIOR,
-                                                  .param1 = SCRL_LEFT};
-        return true;
-    case 0xDC:
-        *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_MSC_BEHAVIOR,
-                                                  .param1 = SCRL_RIGHT};
-        return true;
+    case 0xD9: case 0xDA: case 0xDB: case 0xDC:
+        action = VIA_COMPAT_ACTION_MOUSE_SCROLL;
+        value = keycode - 0xD9;
+        break;
     case 0xDD: case 0xDE: case 0xDF:
         action = VIA_COMPAT_ACTION_MOUSE_ACCEL;
         value = keycode - 0xDD;
@@ -1130,6 +1210,12 @@ static bool via_compat_binding_to_qmk(const struct zmk_behavior_binding *binding
             return false;
         }
         *keycode = QMK_QK_MOUSE_MIN + (binding->param1 & 0xFF);
+        return true;
+    case VIA_COMPAT_ACTION_MOUSE_SCROLL:
+        if ((binding->param1 & 0xFF) > 3) {
+            return false;
+        }
+        *keycode = 0xD9 + (binding->param1 & 0xFF);
         return true;
     case VIA_COMPAT_ACTION_MOUSE_ACCEL:
         if ((binding->param1 & 0xFF) > 2) {
