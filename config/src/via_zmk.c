@@ -14,6 +14,7 @@
 #include <via_translation.h>
 #include <zmk/behavior.h>
 #include <zmk/behavior_queue.h>
+#include <zmk/endpoints.h>
 #include <zmk/keymap.h>
 #include <zmk/physical_layouts.h>
 #include <zmk/matrix.h>
@@ -382,7 +383,10 @@ static K_WORK_DELAYABLE_DEFINE(via_oneshot_release_work, via_oneshot_release_wor
 static void via_oneshot_release_work_handler(struct k_work *work) {
     ARG_UNUSED(work);
     if (via_oneshot_mods) {
-        zmk_hid_unregister_mods(via_oneshot_mods);
+        int changed = zmk_hid_unregister_mods(via_oneshot_mods);
+        if (changed > 0) {
+            (void)zmk_endpoints_send_report(HID_USAGE_KEY);
+        }
         via_oneshot_mods = 0;
     }
 }
@@ -484,19 +488,29 @@ static int via_compat_binding_pressed(struct zmk_behavior_binding *binding,
     const uint8_t action = binding->param1 >> VIA_COMPAT_ACTION_SHIFT;
     const uint8_t value = binding->param1 & 0xFF;
     switch (action) {
-    case VIA_COMPAT_ACTION_LM:
+    case VIA_COMPAT_ACTION_LM: {
         if (zmk_keymap_layer_activate(value) < 0) {
             return -EINVAL;
         }
-        return zmk_hid_register_mods(via_qmk_mods_to_zmk(binding->param2 >> 24));
+        int changed = zmk_hid_register_mods(via_qmk_mods_to_zmk(binding->param2 >> 24));
+        if (changed < 0) {
+            return changed;
+        }
+        return changed > 0 ? zmk_endpoints_send_report(HID_USAGE_KEY) : 0;
+    }
     case VIA_COMPAT_ACTION_DF:
         return zmk_keymap_set_default_layer(value, false);
     case VIA_COMPAT_ACTION_PDF:
         return zmk_keymap_set_default_layer(value, true);
-    case VIA_COMPAT_ACTION_OSM:
+    case VIA_COMPAT_ACTION_OSM: {
         via_oneshot_mods = via_qmk_mods_to_zmk(value);
         k_work_reschedule(&via_oneshot_release_work, K_MSEC(5000));
-        return zmk_hid_register_mods(via_oneshot_mods);
+        int changed = zmk_hid_register_mods(via_oneshot_mods);
+        if (changed < 0) {
+            return changed;
+        }
+        return changed > 0 ? zmk_endpoints_send_report(HID_USAGE_KEY) : 0;
+    }
     case VIA_COMPAT_ACTION_MOUSE_ACCEL: {
         const uint8_t bit = via_mouse_accel_bit(value);
         if (!bit) {
@@ -539,9 +553,17 @@ static int via_compat_binding_released(struct zmk_behavior_binding *binding,
     const uint8_t action = binding->param1 >> VIA_COMPAT_ACTION_SHIFT;
     const uint8_t value = binding->param1 & 0xFF;
     switch (action) {
-    case VIA_COMPAT_ACTION_LM:
-        zmk_hid_unregister_mods(via_qmk_mods_to_zmk(binding->param2 >> 24));
+    case VIA_COMPAT_ACTION_LM: {
+        int changed = zmk_hid_unregister_mods(via_qmk_mods_to_zmk(binding->param2 >> 24));
+        if (changed < 0) {
+            return changed;
+        }
+        int ret = changed > 0 ? zmk_endpoints_send_report(HID_USAGE_KEY) : 0;
+        if (ret < 0) {
+            return ret;
+        }
         return zmk_keymap_layer_deactivate(value);
+    }
     case VIA_COMPAT_ACTION_MOUSE_ACCEL: {
         const uint8_t bit = via_mouse_accel_bit(value);
         if (!bit) {
