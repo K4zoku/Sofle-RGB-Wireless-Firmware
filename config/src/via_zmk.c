@@ -11,6 +11,7 @@
 #include <dt-bindings/zmk/modifiers.h>
 #include <raw_hid/events.h>
 #include <via_macro.h>
+#include <via_translation.h>
 #include <zmk/behavior.h>
 #include <zmk/behavior_queue.h>
 #include <zmk/keymap.h>
@@ -921,6 +922,9 @@ static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *bi
     if (via_custom_keycode_to_binding(keycode, binding)) {
         return true;
     }
+    if (via_translation_classify_keycode(keycode) == VIA_TRANSLATION_UNSUPPORTED) {
+        return false;
+    }
     if (keycode <= QMK_QK_BASIC_MAX && via_qmk_mouse_to_binding((uint8_t)keycode, binding)) {
         return true;
     }
@@ -1430,23 +1434,20 @@ static bool via_normalize_encoder_keycode(uint16_t keycode, uint32_t *param) {
         return false;
     }
 
-    uint16_t payload = (action == VIA_ENCODER_ACTION_LT) ? (keycode & 0xFFu) :
-                       (action == VIA_ENCODER_ACTION_LM) ? (keycode & 0x1Fu) : 0u;
-    *param = VIA_ENCODER_LAYER_TAG | ((uint32_t)action << VIA_ENCODER_LAYER_ACTION_SHIFT) |
-             ((uint32_t)layer_id << VIA_ENCODER_LAYER_ID_SHIFT) | payload;
+    const uint16_t payload = (action == VIA_ENCODER_ACTION_LT) ? (keycode & 0xFFu) :
+                             (action == VIA_ENCODER_ACTION_LM) ? (keycode & 0x1Fu) : 0u;
+    *param = via_encoder_tag_encode(action, layer_id, payload);
     return true;
 }
 
 static bool via_encoder_tagged_param_to_binding(uint32_t param,
                                                 struct zmk_behavior_binding *binding) {
-    const uint8_t action =
-        (param >> VIA_ENCODER_LAYER_ACTION_SHIFT) & VIA_ENCODER_LAYER_ACTION_MASK;
-    const zmk_keymap_layer_id_t layer_id =
-        (param >> VIA_ENCODER_LAYER_ID_SHIFT) & VIA_ENCODER_LAYER_ID_MASK;
-    if ((param & VIA_ENCODER_LAYER_TAG_MASK) != VIA_ENCODER_LAYER_TAG ||
-        layer_id >= ZMK_KEYMAP_LAYERS_LEN) {
+    struct via_encoder_tag tag;
+    if (!via_encoder_tag_decode(param, &tag) || tag.layer_id >= ZMK_KEYMAP_LAYERS_LEN) {
         return false;
     }
+    const uint8_t action = tag.action;
+    const zmk_keymap_layer_id_t layer_id = tag.layer_id;
 
     switch (action) {
     case VIA_ENCODER_ACTION_LT:
