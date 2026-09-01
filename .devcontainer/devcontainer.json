@@ -1,0 +1,17 @@
+{
+  "name": "ZMK VIA Stack",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "remoteUser": "root",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-vscode.cpptools"],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}

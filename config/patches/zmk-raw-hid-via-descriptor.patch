@@ -1,0 +1,96 @@
+diff --git a/boards/shields/raw_hid_adapter/raw_hid_adapter.conf b/boards/shields/raw_hid_adapter/raw_hid_adapter.conf
+index 22f0427..d8101de 100644
+--- a/boards/shields/raw_hid_adapter/raw_hid_adapter.conf
++++ b/boards/shields/raw_hid_adapter/raw_hid_adapter.conf
+@@ -2,4 +2,6 @@
+ CONFIG_RAW_HID=y
+ 
+ # add additional USB HID device
+-CONFIG_USB_HID_DEVICE_COUNT=2
+\ No newline at end of file
++CONFIG_USB_HID_DEVICE_COUNT=2
++CONFIG_ENABLE_HID_INT_OUT_EP=y
++CONFIG_HID_INTERRUPT_EP_MPS=32
+\ No newline at end of file
+diff --git a/include/raw_hid/raw_hid.h b/include/raw_hid/raw_hid.h
+index bf5011f..1f9afe2 100644
+--- a/include/raw_hid/raw_hid.h
++++ b/include/raw_hid/raw_hid.h
+@@ -13,17 +13,20 @@ static const uint8_t raw_hid_report_desc[] = {
+     HID_USAGE_PAGE16_SINGLE(CONFIG_RAW_HID_USAGE_PAGE),
+     HID_USAGE(CONFIG_RAW_HID_USAGE),
+ 
+-    HID_COLLECTION(0x01),
++    HID_COLLECTION(HID_COLLECTION_APPLICATION),
+ 
++    HID_USAGE(0x62),
+     HID_LOGICAL_MIN8(0x00),
+     HID_LOGICAL_MAX16(0xFF, 0x00),
+-    HID_REPORT_SIZE(0x08),
+     HID_REPORT_COUNT(CONFIG_RAW_HID_REPORT_SIZE),
+-
+-    HID_USAGE(0x01),
++    HID_REPORT_SIZE(0x08),
+     HID_INPUT(ZMK_HID_MAIN_VAL_DATA | ZMK_HID_MAIN_VAL_VAR | ZMK_HID_MAIN_VAL_ABS),
+ 
+-    HID_USAGE(0x02),
++    HID_USAGE(0x63),
++    HID_LOGICAL_MIN8(0x00),
++    HID_LOGICAL_MAX16(0xFF, 0x00),
++    HID_REPORT_COUNT(CONFIG_RAW_HID_REPORT_SIZE),
++    HID_REPORT_SIZE(0x08),
+     HID_OUTPUT(ZMK_HID_MAIN_VAL_DATA | ZMK_HID_MAIN_VAL_VAR | ZMK_HID_MAIN_VAL_ABS |
+                ZMK_HID_MAIN_VAL_NON_VOL),
+ 
+diff --git a/src/usb_hid.c b/src/usb_hid.c
+index 2e5f045..05ee100 100644
+--- a/src/usb_hid.c
++++ b/src/usb_hid.c
+@@ -21,6 +21,18 @@ static void in_ready_cb(const struct device *dev) { k_sem_give(&hid_sem); }
+ 
+ static int get_report_cb(const struct device *dev, struct usb_setup_packet *setup, int32_t *len,
+                          uint8_t **data) {
++    static uint8_t report[CONFIG_RAW_HID_REPORT_SIZE];
++
++    (void)dev;
++    if ((setup->wValue & HID_GET_REPORT_ID_MASK) != 0 ||
++        ((setup->wValue & HID_GET_REPORT_TYPE_MASK) != HID_REPORT_TYPE_INPUT &&
++         (setup->wValue & HID_GET_REPORT_TYPE_MASK) != HID_REPORT_TYPE_OUTPUT)) {
++        return -ENOTSUP;
++    }
++
++    memset(report, 0, sizeof(report));
++    *data = report;
++    *len = sizeof(report);
+     return 0;
+ }
+ 
+@@ -39,8 +51,28 @@ static int set_report_cb(const struct device *dev, struct usb_setup_packet *setu
+ 
+     return 0;
+ }
++#ifdef CONFIG_ENABLE_HID_INT_OUT_EP
++static void out_ready_cb(const struct device *dev) {
++    static uint8_t report[CONFIG_RAW_HID_REPORT_SIZE];
++    uint32_t length;
++    int err = hid_int_ep_read(dev, report, sizeof(report), &length);
++    if (err < 0) {
++        LOG_ERR("Failed to read Raw HID report: %d", err);
++        return;
++    }
++
++    LOG_INF("USB - Received Raw HID report of length %u", length);
++    LOG_HEXDUMP_DBG(report, length, "USB - Received Raw HID report");
++    raise_raw_hid_received_event(
++        (struct raw_hid_received_event){.data = report, .length = length});
++}
++#endif
++
+ 
+ static const struct hid_ops ops = {
++#ifdef CONFIG_ENABLE_HID_INT_OUT_EP
++    .int_out_ready = out_ready_cb,
++#endif
+     .int_in_ready = in_ready_cb,
+     .get_report = get_report_cb,
+     .set_report = set_report_cb,

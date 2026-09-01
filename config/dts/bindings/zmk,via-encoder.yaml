@@ -1,0 +1,20 @@
+description: VIA encoder proxy behavior storing raw QMK keycodes
+compatible: "zmk,via-encoder"
+
+properties:
+  label:
+    type: string
+    required: false
+    deprecated: true
+  "#binding-cells":
+    type: int
+    required: true
+    const: 1
+  "#sensor-binding-cells":
+    type: int
+    required: true
+    const: 2
+
+sensor-binding-cells:
+  - param1
+  - param2

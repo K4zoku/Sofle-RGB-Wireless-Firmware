@@ -1,0 +1,7 @@
+# West workspace (local build artifacts, not part of the config repo)
+/.west/
+/zephyr/
+/modules/
+/build/
+/optional/
+/builddir/
