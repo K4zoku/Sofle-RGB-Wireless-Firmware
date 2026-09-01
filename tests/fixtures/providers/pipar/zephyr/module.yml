@@ -1,0 +1,3 @@
+name: via-pipar-provider
+build:
+  cmake: .

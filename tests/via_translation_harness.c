@@ -7,6 +7,8 @@
 
 #include "via_translation.h"
 
+#include "via_oneshot.h"
+
 #define REPORT_SIZE 32u
 #define ENCODER_TAG 0xA0000000u
 
@@ -202,6 +204,10 @@ int main(int argc, char **argv) {
     for (size_t length = 0; length <= 64; ++length) {
         assert(exact_report_size(length) == (length == REPORT_SIZE));
     }
+    assert(via_oneshot_added(0x01u, 0x00u) == 0x01u);
+    assert(via_oneshot_added(0x01u, 0x01u) == 0x00u);
+    assert(via_oneshot_accumulate(0x02u, 0x01u) == 0x03u);
+    assert(via_oneshot_accumulate(0x01u, 0x01u) == 0x01u);
 
     const uint16_t supported[] = {
         0x0000, 0x0001, 0x0004, 0x0104, 0x5200, 0x5261,

@@ -35,13 +35,33 @@ if [ -d /path/to/keyboard-config/dts ]; then
 fi
 ```
 
-A normal ZMK configuration can use the usual board, shield, and `default`
-file names. If automatic keymap selection does not find the desired file,
-pass it explicitly with `-DKEYMAP_FILE`.
+VIA runs on a standalone keyboard or on the split central only. For a split
+keyboard, enable `CONFIG_ZMK_VIA=y` in the central configuration; peripheral
+builds must leave it disabled. ZMK's normal split configuration may connect any
+number of peripherals, and the central keymap/matrix remains the source of
+the complete topology.
 
-The VIA keymap must provide a `zmk,via-matrix` node with `rows`, `columns`,
-and `map`. The consumer configuration also needs `CONFIG_ZMK_VIA=y` and the
-other Kconfig options required by the selected keyboard.
+The consumer must provide a `zmk,via-matrix` node with `rows`, `columns`, and
+`map`. Map entries are positions in the selected physical layout; use
+`0xFF` for an unused VIA slot. The map length must equal `rows * columns`.
+The module translates selected-layout positions to stock positions before
+accessing the ZMK keymap.
+
+`CONFIG_ZMK_KEYMAP_SETTINGS_STORAGE=y` is required for VIA dynamic keymap
+writes. Macro support is optional: enable `CONFIG_ZMK_VIA_MACRO=y` only when
+the consumer provides a `zmk,via-macro` node. Encoder support is likewise
+optional and requires `CONFIG_ZMK_VIA_ENCODER=y`, a `zmk,via-encoder` node,
+and ZMK sensor bindings.
+
+Custom keycodes have no module-defined semantics. Enable
+`CONFIG_ZMK_VIA_CUSTOM_KEYCODES=y` only with a consumer provider that includes
+`via_custom_keycode.h` and registers
+`ZMK_VIA_CUSTOM_KEYCODE_PROVIDER_DEFINE(...)`. A provider owns both directions
+of its keycode-to-binding mapping and may use any non-overlapping range.
+
+Raw HID responses preserve the ingress transport. A USB request is answered
+on USB and a BLE request is answered on BLE; consumers should not rely on
+cross-transport response fan-out.
 
 ## Apply the VIA changes
 

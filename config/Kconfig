@@ -1,23 +1,34 @@
 menuconfig ZMK_VIA
     bool "VIA compatibility for ZMK"
     depends on RAW_HID
-    depends on ZMK_SPLIT_ROLE_CENTRAL
+    depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
     depends on ZMK_KEYMAP_SETTINGS_STORAGE
     depends on DT_HAS_ZMK_VIA_MATRIX_ENABLED
     default n
     help
       Expose the current ZMK runtime keymap through the QMK/VIA Raw HID
       protocol. A board/keymap must provide a zmk,via-matrix node with
-      rows, columns, and a map array of ZMK position indices.
+      rows, columns, and a map array of selected physical-layout positions.
 
 config ZMK_VIA_CUSTOM_KEYCODES
-    bool "Enable keyboard-specific VIA custom keycodes"
+    bool "Enable consumer-provided VIA custom keycodes"
     depends on ZMK_VIA
     default n
+    help
+      Enable custom keycodes registered by the keyboard consumer. The
+      consumer must provide a VIA custom-keycode provider.
+
+config ZMK_VIA_MACRO
+    bool "Enable VIA macro support"
+    depends on ZMK_VIA
+    depends on DT_HAS_ZMK_VIA_MACRO_ENABLED
+    default y
+    help
+      Enable VIA macro storage and the zmk,via-macro behavior.
 
 config ZMK_VIA_MACRO_COUNT
     int "Number of VIA macros"
-    depends on ZMK_VIA
+    depends on ZMK_VIA_MACRO
     range 1 32
     default 16
     help
@@ -25,7 +36,7 @@ config ZMK_VIA_MACRO_COUNT
 
 config ZMK_VIA_MACRO_BUFFER_SIZE
     int "VIA macro buffer size"
-    depends on ZMK_VIA
+    depends on ZMK_VIA_MACRO
     range 1 65535
     default 1024
     help
@@ -33,7 +44,7 @@ config ZMK_VIA_MACRO_BUFFER_SIZE
 
 config ZMK_VIA_MACRO_DELAY_MS
     int "VIA macro key delay"
-    depends on ZMK_VIA
+    depends on ZMK_VIA_MACRO
     range 0 1000
     default 5
     help
@@ -42,4 +53,5 @@ config ZMK_VIA_MACRO_DELAY_MS
 config ZMK_VIA_ENCODER
     bool "Expose and persist encoder bindings to VIA"
     depends on ZMK_VIA
+    depends on DT_HAS_ZMK_VIA_ENCODER_ENABLED
     default n

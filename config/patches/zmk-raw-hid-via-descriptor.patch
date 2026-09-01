@@ -12,6 +12,36 @@ index 22f0427..d8101de 100644
 +CONFIG_ENABLE_HID_INT_OUT_EP=y
 +CONFIG_HID_INTERRUPT_EP_MPS=32
 \ No newline at end of file
+diff --git a/include/raw_hid/events.h b/include/raw_hid/events.h
+index e4632be..6e4e398 100644
+--- a/include/raw_hid/events.h
++++ b/include/raw_hid/events.h
+@@ -2,9 +2,16 @@
+ 
+ #include <zmk/event_manager.h>
+ 
++enum raw_hid_transport {
++    RAW_HID_TRANSPORT_ANY,
++    RAW_HID_TRANSPORT_USB,
++    RAW_HID_TRANSPORT_BLE,
++};
++
+ struct raw_hid_received_event {
+     uint8_t *data;
+     uint8_t length;
++    enum raw_hid_transport transport;
+ };
+ 
+ ZMK_EVENT_DECLARE(raw_hid_received_event);
+@@ -12,6 +19,7 @@ ZMK_EVENT_DECLARE(raw_hid_received_event);
+ struct raw_hid_sent_event {
+     uint8_t *data;
+     uint8_t length;
++    enum raw_hid_transport transport;
+ };
+ 
+ ZMK_EVENT_DECLARE(raw_hid_sent_event);
+\ No newline at end of file
 diff --git a/include/raw_hid/raw_hid.h b/include/raw_hid/raw_hid.h
 index bf5011f..1f9afe2 100644
 --- a/include/raw_hid/raw_hid.h
@@ -43,10 +73,23 @@ index bf5011f..1f9afe2 100644
                 ZMK_HID_MAIN_VAL_NON_VOL),
  
 diff --git a/src/hog.c b/src/hog.c
-index 5154318..73d6e50 100644
+index 5154318..cc33170 100644
 --- a/src/hog.c
 +++ b/src/hog.c
-@@ -123,6 +123,12 @@ BT_GATT_SERVICE_DEFINE(
+@@ -76,7 +76,11 @@ static ssize_t write_hids_raw_hid_report(struct bt_conn *conn, const struct bt_g
+     uint8_t *data = (uint8_t *)buf;
+     LOG_INF("BT - Received Raw HID report of length %i", len);
+     LOG_HEXDUMP_DBG(data, len, "BT - Received Raw HID report");
+-    raise_raw_hid_received_event((struct raw_hid_received_event){.data = data, .length = len});
++    raise_raw_hid_received_event((struct raw_hid_received_event){
++        .data = data,
++        .length = len,
++        .transport = RAW_HID_TRANSPORT_BLE,
++    });
+ 
+     return len;
+ }
+@@ -123,6 +127,12 @@ BT_GATT_SERVICE_DEFINE(
                             BT_GATT_PERM_WRITE, NULL, write_ctrl_point, &ctrl_point));
  
  static void send_report(const uint8_t *data, uint8_t len) {
@@ -59,8 +102,19 @@ index 5154318..73d6e50 100644
      struct bt_conn *conn = zmk_ble_active_profile_conn();
      if (conn == NULL) {
          LOG_ERR("Not connected to active profile");
+@@ -152,6 +162,10 @@ static void send_report(const uint8_t *data, uint8_t len) {
+ 
+ static int raw_hid_sent_event_listener(const zmk_event_t *eh) {
+     struct raw_hid_sent_event *event = as_raw_hid_sent_event(eh);
++    if (event && event->transport != RAW_HID_TRANSPORT_ANY &&
++        event->transport != RAW_HID_TRANSPORT_BLE) {
++        return ZMK_EV_EVENT_BUBBLE;
++    }
+     if (event) {
+         send_report(event->data, event->length);
+     }
 diff --git a/src/usb_hid.c b/src/usb_hid.c
-index 2e5f045..aca2429 100644
+index 2e5f045..55003f6 100644
 --- a/src/usb_hid.c
 +++ b/src/usb_hid.c
 @@ -21,6 +21,18 @@ static void in_ready_cb(const struct device *dev) { k_sem_give(&hid_sem); }
@@ -82,7 +136,13 @@ index 2e5f045..aca2429 100644
      return 0;
  }
  
-@@ -39,15 +51,45 @@ static int set_report_cb(const struct device *dev, struct usb_setup_packet *setu
+@@ -35,19 +47,52 @@ static int set_report_cb(const struct device *dev, struct usb_setup_packet *setu
+ 
+     LOG_INF("USB - Received Raw HID report of length %i", *len);
+     LOG_HEXDUMP_DBG(*data, *len, "USB - Received Raw HID report");
+-    raise_raw_hid_received_event((struct raw_hid_received_event){.data = *data, .length = *len});
++    raise_raw_hid_received_event((struct raw_hid_received_event){
++        .data = *data, .length = *len, .transport = RAW_HID_TRANSPORT_USB});
  
      return 0;
  }
@@ -99,7 +159,9 @@ index 2e5f045..aca2429 100644
 +    LOG_INF("USB - Received Raw HID report of length %u", length);
 +    LOG_HEXDUMP_DBG(report, length, "USB - Received Raw HID report");
 +    raise_raw_hid_received_event(
-+        (struct raw_hid_received_event){.data = report, .length = length});
++        (struct raw_hid_received_event){.data = report,
++                                        .length = length,
++                                        .transport = RAW_HID_TRANSPORT_USB});
 +}
 +#endif
 +
@@ -129,7 +191,7 @@ index 2e5f045..aca2429 100644
  
      LOG_INF("USB - Sending Raw HID report of length %i", len);
      /*
-@@ -62,7 +104,7 @@ static void send_report(const uint8_t *data, uint8_t len) {
+@@ -62,7 +107,7 @@ static void send_report(const uint8_t *data, uint8_t len) {
      memcpy(report, data, len);
      LOG_HEXDUMP_DBG(report, CONFIG_RAW_HID_REPORT_SIZE, "USB - Sending Raw HID report");
  
@@ -138,3 +200,14 @@ index 2e5f045..aca2429 100644
      if (err) {
          LOG_ERR("Failed to send report: %i", err);
          k_sem_give(&hid_sem);
+@@ -71,6 +116,10 @@ static void send_report(const uint8_t *data, uint8_t len) {
+ 
+ static int raw_hid_sent_event_listener(const zmk_event_t *eh) {
+     struct raw_hid_sent_event *event = as_raw_hid_sent_event(eh);
++    if (event && event->transport != RAW_HID_TRANSPORT_ANY &&
++        event->transport != RAW_HID_TRANSPORT_USB) {
++        return ZMK_EV_EVENT_BUBBLE;
++    }
+     if (event) {
+         send_report(event->data, event->length);
+     }

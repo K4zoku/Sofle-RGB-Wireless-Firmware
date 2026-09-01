@@ -11,7 +11,11 @@
 #include <drivers/behavior.h>
 #include <dt-bindings/zmk/modifiers.h>
 #include <raw_hid/events.h>
+#include <via_custom_keycode.h>
+#include <via_oneshot.h>
+#if IS_ENABLED(CONFIG_ZMK_VIA_MACRO)
 #include <via_macro.h>
+#endif
 #include <via_translation.h>
 #include <zmk/behavior.h>
 #include <zmk/behavior_queue.h>
@@ -106,8 +110,6 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 
 #define QMK_QK_MACRO 0x7700
 #define QMK_QK_MACRO_MAX 0x777F
-#define VIA_CUSTOM_KEYCODE_BASE 0x7E00
-#define VIA_CUSTOM_KEYCODE_LAST 0x7E0E
 
 #define VIA_ENCODER_LAYER_TAG_MASK 0xF0000000u
 #define VIA_ENCODER_LAYER_TAG 0xA0000000u
@@ -183,7 +185,7 @@ LOG_MODULE_REGISTER(zmk_via, CONFIG_ZMK_LOG_LEVEL);
 #else
 #define VIA_NONE_BEHAVIOR ""
 #endif
-#if DT_NODE_EXISTS(DT_NODELABEL(via_macro))
+#if IS_ENABLED(CONFIG_ZMK_VIA_MACRO) && DT_NODE_EXISTS(DT_NODELABEL(via_macro))
 #define VIA_MACRO_BEHAVIOR DEVICE_DT_NAME(DT_NODELABEL(via_macro))
 #else
 #define VIA_MACRO_BEHAVIOR ""
@@ -242,8 +244,8 @@ BUILD_ASSERT((QMK_QK_MOD_TAP | ((uint16_t)BIT(0) << 8) | 0x06) == 0x2106,
 BUILD_ASSERT((QMK_QK_MOD_TAP | ((uint16_t)(BIT(2) | BIT(4)) << 8) | 0x1B) == 0x341B,
              "QMK RALT_T(KC_X) encoding changed");
 
-/* The keyboard supplies this virtual-matrix-to-ZMK-position adapter in Devicetree. */
-static const uint8_t via_position_map[] =
+/* Map VIA slots to positions in the selected physical layout. */
+static const uint32_t via_position_map[] =
     DT_PROP(DT_NODELABEL(via_matrix), map);
 BUILD_ASSERT(DT_PROP_LEN(DT_NODELABEL(via_matrix), map) == VIA_KEYMAP_SLOTS,
              "VIA map length must equal rows * columns");
@@ -515,12 +517,16 @@ static int via_compat_binding_pressed(struct zmk_behavior_binding *binding,
     case VIA_COMPAT_ACTION_PDF:
         return zmk_keymap_set_default_layer(value, true);
     case VIA_COMPAT_ACTION_OSM: {
-        via_oneshot_mods = via_qmk_mods_to_zmk(value);
-        k_work_reschedule(&via_oneshot_release_work, K_MSEC(5000));
-        int changed = zmk_hid_register_mods(via_oneshot_mods);
+        const zmk_mod_flags_t requested = via_qmk_mods_to_zmk(value);
+        const zmk_mod_flags_t added =
+            via_oneshot_added((uint8_t)requested, (uint8_t)via_oneshot_mods);
+        int changed = zmk_hid_register_mods(added);
         if (changed < 0) {
             return changed;
         }
+        via_oneshot_mods =
+            via_oneshot_accumulate((uint8_t)requested, (uint8_t)via_oneshot_mods);
+        k_work_reschedule(&via_oneshot_release_work, K_MSEC(5000));
         return changed > 0 ? zmk_endpoints_send_report(HID_USAGE_KEY) : 0;
     }
     case VIA_COMPAT_ACTION_MOUSE_ACCEL: {
@@ -893,85 +899,7 @@ static bool via_usage_to_qmk_basic(uint32_t usage, uint8_t *keycode) {
 static bool via_custom_keycode_to_binding(uint16_t keycode,
                                           struct zmk_behavior_binding *binding) {
 #if IS_ENABLED(CONFIG_ZMK_VIA_CUSTOM_KEYCODES)
-    if (keycode < VIA_CUSTOM_KEYCODE_BASE || keycode > VIA_CUSTOM_KEYCODE_LAST) {
-        return false;
-    }
-
-    switch (keycode - VIA_CUSTOM_KEYCODE_BASE) {
-    case 0:
-        *binding = (struct zmk_behavior_binding){
-            .behavior_dev = VIA_BT_BEHAVIOR,
-            .param1 = BT_CLR_CMD,
-        };
-        return true;
-    case 1:
-    case 2:
-    case 3:
-    case 4:
-    case 5:
-        *binding = (struct zmk_behavior_binding){
-            .behavior_dev = VIA_BT_BEHAVIOR,
-            .param1 = BT_SEL_CMD,
-            .param2 = keycode - VIA_CUSTOM_KEYCODE_BASE - 1,
-        };
-        return true;
-    case 6:
-        *binding = (struct zmk_behavior_binding){
-            .behavior_dev = VIA_EXT_POWER_BEHAVIOR,
-            .param1 = EXT_POWER_TOGGLE_CMD,
-        };
-        return true;
-    case 7:
-        *binding = (struct zmk_behavior_binding){
-            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
-            .param1 = RGB_HUD_CMD,
-        };
-        return true;
-    case 8:
-        *binding = (struct zmk_behavior_binding){
-            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
-            .param1 = RGB_HUI_CMD,
-        };
-        return true;
-    case 9:
-        *binding = (struct zmk_behavior_binding){
-            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
-            .param1 = RGB_SAD_CMD,
-        };
-        return true;
-    case 10:
-        *binding = (struct zmk_behavior_binding){
-            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
-            .param1 = RGB_SAI_CMD,
-        };
-        return true;
-    case 11:
-        *binding = (struct zmk_behavior_binding){
-            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
-            .param1 = RGB_EFF_CMD,
-        };
-        return true;
-    case 12:
-        *binding = (struct zmk_behavior_binding){
-            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
-            .param1 = RGB_BRD_CMD,
-        };
-        return true;
-    case 13:
-        *binding = (struct zmk_behavior_binding){
-            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
-            .param1 = RGB_BRI_CMD,
-        };
-        return true;
-    case 14:
-        *binding = (struct zmk_behavior_binding){
-            .behavior_dev = VIA_RGB_UG_BEHAVIOR,
-            .param1 = RGB_TOG_CMD,
-        };
-        return true;
-    default:
-        return false;
-    }
+    return zmk_via_custom_keycode_to_binding(keycode, binding);
 #else
     (void)keycode;
     (void)binding;
@@ -1032,6 +960,7 @@ static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *bi
         *binding = (struct zmk_behavior_binding){.behavior_dev = VIA_TRANS_BEHAVIOR};
         return true;
     }
+#if IS_ENABLED(CONFIG_ZMK_VIA_MACRO)
     if (keycode >= QMK_QK_MACRO && keycode <= QMK_QK_MACRO_MAX) {
         const uint16_t id = keycode - QMK_QK_MACRO;
         if (id >= zmk_via_macro_get_count() || !VIA_MACRO_BEHAVIOR[0]) {
@@ -1043,6 +972,7 @@ static bool via_qmk_to_binding(uint16_t keycode, struct zmk_behavior_binding *bi
         };
         return true;
     }
+#endif
     if (via_custom_keycode_to_binding(keycode, binding)) {
         return true;
     }
@@ -1297,56 +1227,7 @@ static bool via_mouse_binding_to_qmk(const struct zmk_behavior_binding *binding,
 static bool via_binding_to_custom_keycode(const struct zmk_behavior_binding *binding,
                                           uint16_t *keycode) {
 #if IS_ENABLED(CONFIG_ZMK_VIA_CUSTOM_KEYCODES)
-    if (!binding || !binding->behavior_dev) {
-        return false;
-    }
-
-    if (strcmp(binding->behavior_dev, VIA_BT_BEHAVIOR) == 0) {
-        if (binding->param1 == BT_CLR_CMD && binding->param2 == 0) {
-            *keycode = VIA_CUSTOM_KEYCODE_BASE;
-            return true;
-        }
-        if (binding->param1 == BT_SEL_CMD && binding->param2 < 5) {
-            *keycode = VIA_CUSTOM_KEYCODE_BASE + 1 + binding->param2;
-            return true;
-        }
-    }
-    if (strcmp(binding->behavior_dev, VIA_EXT_POWER_BEHAVIOR) == 0 &&
-        binding->param1 == EXT_POWER_TOGGLE_CMD && binding->param2 == 0) {
-        *keycode = VIA_CUSTOM_KEYCODE_BASE + 6;
-        return true;
-    }
-    if (strcmp(binding->behavior_dev, VIA_RGB_UG_BEHAVIOR) == 0 && binding->param2 == 0) {
-        switch (binding->param1) {
-        case RGB_HUD_CMD:
-            *keycode = VIA_CUSTOM_KEYCODE_BASE + 7;
-            return true;
-        case RGB_HUI_CMD:
-            *keycode = VIA_CUSTOM_KEYCODE_BASE + 8;
-            return true;
-        case RGB_SAD_CMD:
-            *keycode = VIA_CUSTOM_KEYCODE_BASE + 9;
-            return true;
-        case RGB_SAI_CMD:
-            *keycode = VIA_CUSTOM_KEYCODE_BASE + 10;
-            return true;
-        case RGB_EFF_CMD:
-            *keycode = VIA_CUSTOM_KEYCODE_BASE + 11;
-            return true;
-        case RGB_BRD_CMD:
-            *keycode = VIA_CUSTOM_KEYCODE_BASE + 12;
-            return true;
-        case RGB_BRI_CMD:
-            *keycode = VIA_CUSTOM_KEYCODE_BASE + 13;
-            return true;
-        case RGB_TOG_CMD:
-            *keycode = VIA_CUSTOM_KEYCODE_BASE + 14;
-            return true;
-        default:
-            break;
-        }
-    }
-    return false;
+    return zmk_via_binding_to_custom_keycode(binding, keycode);
 #else
     (void)binding;
     (void)keycode;
@@ -1369,11 +1250,13 @@ static bool via_binding_to_qmk(const struct zmk_behavior_binding *binding, uint1
         *keycode = QMK_KC_TRANSPARENT;
         return true;
     }
+#if IS_ENABLED(CONFIG_ZMK_VIA_MACRO)
     if (strcmp(binding->behavior_dev, VIA_MACRO_BEHAVIOR) == 0 &&
         binding->param1 < zmk_via_macro_get_count()) {
         *keycode = QMK_QK_MACRO + binding->param1;
         return true;
     }
+#endif
     if (via_binding_to_custom_keycode(binding, keycode) ||
         via_compat_binding_to_qmk(binding, keycode) ||
         via_mouse_binding_to_qmk(binding, keycode)) {
@@ -1753,7 +1636,12 @@ static bool via_slot_to_zmk_position(uint8_t row, uint8_t column, uint8_t *posit
         return false;
     }
 
-    *position = via_position_map[row * VIA_KEYMAP_COLS + column];
+    const uint32_t mapped_position = via_position_map[row * VIA_KEYMAP_COLS + column];
+    if (mapped_position > UINT8_MAX) {
+        return false;
+    }
+
+    *position = (uint8_t)mapped_position;
     const uint32_t *selected_to_stock;
     const int selected_length =
         zmk_physical_layouts_get_selected_to_stock_position_map(&selected_to_stock);
@@ -2084,6 +1972,7 @@ static void via_write_u32(uint8_t *data, uint32_t value) {
     data[3] = value;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_VIA_MACRO)
 static bool via_get_macro_buffer(uint16_t offset, uint8_t size, uint8_t *data) {
     const size_t buffer_size = zmk_via_macro_get_buffer_size();
     if (size > VIA_REPORT_SIZE - 4 || (size_t)offset > buffer_size) {
@@ -2097,6 +1986,7 @@ static bool via_get_macro_buffer(uint16_t offset, uint8_t size, uint8_t *data) {
     memset(data + available, 0, size - available);
     return true;
 }
+#endif
 
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
 static uint8_t via_rgb_speed_to_via(uint8_t speed) {
@@ -2278,17 +2168,25 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
             handled = false;
             break;
         }
+#if IS_ENABLED(CONFIG_ZMK_VIA_MACRO)
         ret = zmk_via_macro_reset();
-        handled = ret >= 0;
-        changed = handled;
+        if (ret < 0) {
+            handled = false;
+            break;
+        }
+#endif
+        changed = true;
         break;
     }
+#if IS_ENABLED(CONFIG_ZMK_VIA_MACRO)
     case VIA_CMD_MACRO_GET_COUNT:
         report[1] = zmk_via_macro_get_count();
         break;
+#endif
     case VIA_CMD_BOOTLOADER_JUMP:
         k_work_reschedule(&via_bootloader_work, K_MSEC(100));
         break;
+#if IS_ENABLED(CONFIG_ZMK_VIA_MACRO)
     case VIA_CMD_MACRO_GET_BUFFER_SIZE: {
         const size_t size = zmk_via_macro_get_buffer_size();
         report[1] = size >> 8;
@@ -2314,6 +2212,7 @@ static bool via_handle_report(uint8_t *report, bool *changed_out) {
         changed = ret > 0;
         break;
     }
+#endif
     case VIA_CMD_GET_LAYER_COUNT:
         report[1] = ZMK_KEYMAP_LAYERS_LEN;
         break;
@@ -2361,7 +2260,6 @@ static void via_bootloader_work_handler(struct k_work *work) {
 }
 
 static K_WORK_DELAYABLE_DEFINE(via_bootloader_work, via_bootloader_work_handler);
-
 static struct k_work via_save_work;
 static uint8_t response_report[VIA_REPORT_SIZE];
 
@@ -2372,10 +2270,12 @@ static void via_save_work_handler(struct k_work *work) {
         LOG_ERR("Failed to persist VIA keymap changes: %d", ret);
     }
 
+#if IS_ENABLED(CONFIG_ZMK_VIA_MACRO)
     ret = zmk_via_macro_save_changes();
     if (ret < 0) {
         LOG_ERR("Failed to persist VIA macro changes: %d", ret);
     }
+#endif
 }
 
 static int via_raw_hid_received_listener(const zmk_event_t *event) {
@@ -2392,6 +2292,7 @@ static int via_raw_hid_received_listener(const zmk_event_t *event) {
     raise_raw_hid_sent_event((struct raw_hid_sent_event){
         .data = response_report,
         .length = VIA_REPORT_SIZE,
+        .transport = received->transport,
     });
     if (changed) {
         (void)k_work_submit(&via_save_work);

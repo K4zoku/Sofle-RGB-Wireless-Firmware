@@ -1,0 +1,3 @@
+name: via-sofle-provider
+build:
+  cmake: .
